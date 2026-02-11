@@ -1,5 +1,5 @@
 # Architecture document for the GXFS Catalogue
-## Documents
+## XFSC Federated Catalogue
 The content of the document is available here
 * [PDF](
 https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/architecture-document/-/jobs/artifacts/main/raw/build/pdf/architecture/catalogue-architecture.pdf?job=generate_pdf)
@@ -11,3 +11,5 @@ The XFSC Federated Catalogue (CAT) manages metadata objects (typically credentia
 This enhancement of the CAT modularizes its verification of credentials against trust anchors and generalizes its management of metadata objects beyond the former focus on credentials; thus, it will also be able to function as a Template Repository for the FACIS Digital Contract Service (DCS).
 
 The enhanced specification document can be found here : [PDF](https://github.com/Jessia2597/docs/blob/main/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf)
+
+The implementation of the federated catalogue can be found here : [`implementation/federated-catalogue`](https://github.com/eclipse-xfsc/federated-catalogue)
