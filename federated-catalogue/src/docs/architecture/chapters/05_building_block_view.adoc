@@ -112,7 +112,7 @@ The catalogue implementation is structured into two main components _fc-service-
 | Service | Component, controlling the workflows and interactions between the subcomponents.
 | Authorization | Handling the authorization, and user management in combination with the _Service_ and _Authentication_ component.
 | Authentication | This component stores the users and participant metadata.
-| Verification | Responsible for applied the defined verification rules on the Self-Descriptions. Also extracts the claims from the Verifiable Presentation (_Claim Extractor_). Also contains a component to periodically revalidate submitted Self-Descriptions (_Revalidation Service_).
+| Verification | Responsible for applying the defined verification rules on the Self-Descriptions (syntactic, semantic, cryptographic). Also extracts the claims from the Verifiable Presentation (_Claim Extractor_). As specified by CAT-FR-SF-04, automatic schema validation against SHACL shapes has been removed from the upload flow and extracted to a dedicated _Schema Validation Service_. Also contains a component to periodically revalidate submitted Self-Descriptions (_Revalidation Service_).
 | Graph Store | Interface and logic for communicating with the Graph DB.
 
 | Schema Store
@@ -201,17 +201,17 @@ public interface VerificationService {
    * The function validates the Self-Description as JSON and tries to parse the json handed over.
    *
    * @param payload ContentAccessor to SD which should be syntactically validated.
+   * @return a Verification result. If the verification fails, the reason explains the issue.
+   */
+  VerificationResultResource verifyResourceSelfDescription(ContentAccessor payload) throws VerificationException;
+
+  /**
+   * The function validates the Self-Description as JSON and tries to parse the json handed over.
+   *
+   * @param payload ContentAccessor to SD which should be syntactically validated.
    * @return a Self-Description metadata validation result. If the validation fails, the reason explains the issue.
    */
   VerificationResult verifySelfDescription(ContentAccessor payload) throws VerificationException;
-
-  /**
-   * The function validates the Self-Description against the composite schema.
-   *
-   * @param payload ContentAccessor to SD which should be validated.
-   * @return the result of the semantic validation.
-   */
-  SemanticValidationResult verifySelfDescriptionAgainstCompositeSchema(ContentAccessor payload);
 
   /**
    * The function validates the Self-Description as JSON and tries to parse the json handed over.
@@ -219,12 +219,13 @@ public interface VerificationService {
    * @param payload
    * @param verifySemantics
    * @param verifySchema
-   * @param verifySignatures
+   * @param verifyVPSignatures
+   * @param verifyVCSignatures
    * @return
    * @throws VerificationException
    */
-  VerificationResult verifySelfDescription(ContentAccessor payload,
-      boolean verifySemantics, boolean verifySchema, boolean verifySignatures) throws VerificationException;
+  VerificationResult verifySelfDescription(ContentAccessor payload, boolean verifySemantics, boolean verifySchema,
+      boolean verifyVPSignatures, boolean verifyVCSignatures) throws VerificationException;
 
   /**
    * Extract claims from the given payload. This does not do any validation of the payload.
@@ -233,15 +234,85 @@ public interface VerificationService {
    * @return The list of extracted claims.
    */
   List<SdClaim> extractClaims(ContentAccessor payload);
+
+  /**
+   * The function validates the Self-Description against the given schema.
+   *
+   * @param payload ContentAccessor to SD which should be validated.
+   * @param schema ContentAccessor - the schema to validate SD against (null = composite)
+   * @return the result of the semantic validation.
+   * @deprecated Use {@link SchemaValidationService#validateSelfDescriptionAgainstSchema} directly.
+   */
+  @Deprecated
+  SemanticValidationResult verifySelfDescriptionAgainstSchema(ContentAccessor payload, ContentAccessor schema);
+
+  /**
+   * The function validates the Self-Description against the composite schema.
+   *
+   * @param payload ContentAccessor to SD which should be validated.
+   * @return the result of the semantic validation.
+   * @deprecated Use {@link SchemaValidationService#validateSelfDescriptionAgainstCompositeSchema} directly.
+   */
+  @Deprecated
+  SemanticValidationResult verifySelfDescriptionAgainstCompositeSchema(ContentAccessor payload);
 }
 ----
 
+[#_schema_validation_service]
+===== Schema Validation Service
+
+As specified by CAT-FR-SF-04, automatic schema validation has been **removed from the upload verification flow**. The Schema Validation Service was extracted from the `VerificationService` to provide on-demand SHACL schema validation of stored assets. This service prepares the infrastructure for CAT-FR-CO-05, which will expose on-demand validation of stored assets against specific schemas via a dedicated API endpoint.
+
+[source,java]
+----
+/**
+ * Dedicated service for SHACL schema validation of Self-Descriptions.
+ * Extracted from VerificationService to support on-demand validation (CAT-FR-CO-05).
+ */
+@Service
+public interface SchemaValidationService {
+
+  /**
+   * Validates a Self-Description payload against a specific SHACL shape graph.
+   *
+   * @param payload The Self-Description to validate.
+   * @param schema The SHACL shape graph to validate against.
+   * @return the result of the schema validation.
+   */
+  SemanticValidationResult validateSelfDescriptionAgainstSchema(ContentAccessor payload, ContentAccessor schema);
+
+  /**
+   * Validates a Self-Description payload against the composite schema (union of all stored SHACL shapes).
+   *
+   * @param payload The Self-Description to validate.
+   * @return the result of the schema validation.
+   */
+  SemanticValidationResult validateSelfDescriptionAgainstCompositeSchema(ContentAccessor payload);
+
+  /**
+   * Validates pre-extracted claims against a specific SHACL shape graph.
+   *
+   * @param claims The extracted claims to validate.
+   * @param schema The SHACL shape graph to validate against.
+   * @return the result of the schema validation.
+   */
+  SemanticValidationResult validateClaimsAgainstSchema(List<SdClaim> claims, ContentAccessor schema);
+
+  /**
+   * Validates pre-extracted claims against the composite schema (union of all stored SHACL shapes).
+   *
+   * @param claims The extracted claims to validate.
+   * @return the result of the schema validation.
+   */
+  SemanticValidationResult validateClaimsAgainstCompositeSchema(List<SdClaim> claims);
+}
+----
 
 ===== Revalidation Service
 
 This component periodically revalidates existing Self-Descriptions. It checks if the signatures are still valid (e.g. not expired or referencing DID is still available). If the validation of a Self-Description fails, it's either set to state _deprecated_ or _eol_. This will remove the Self-Description from the Graph Database.
 
-Semantic revalidation is not needed here. It is done every time a new Schema is added.
+Semantic revalidation is not needed here. Schema revalidation against SHACL shapes is performed by the `SchemaValidationService` every time a new Schema is added or updated.
 
 ===== Claim Extractor
 

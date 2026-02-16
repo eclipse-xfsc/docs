@@ -571,7 +571,7 @@ sequenceDiagram
     VerificationService --> VerificationService:[Verify Syntax]
     VerificationService --> VerificationService:[Verify Semantic]
     VerificationService --> VerificationService:[Extract SD Type]
-    VerificationService --> VerificationService:[Verify Schema]
+    Note over VerificationService: Schema validation disabled by default verifySchema false (CAT-FR-SF-04)
     VerificationService --> VerificationService:[Verify Signatures]
     VerificationService --> VerificationService:[Extract Participant]
     VerificationService --> VerificationService:[Extract Claims]
@@ -735,8 +735,8 @@ sequenceDiagram
     SchemaStore -->> -API:OK
     API -->> - User:OK
     loop For Each SD
-        Revalidation ->> + Verification:Validate SDs
-        Verification -->> - Revalidation:Result
+        Revalidation ->> + SchemaValidationService:Validate SDs
+        SchemaValidationService -->> - Revalidation:Result
         alt If NOK
             Revalidation ->> SchemaStore:Revoke SD
         end
@@ -869,21 +869,20 @@ sequenceDiagram
 
 ==== Verify Self-Description
 
-The verification of SDs consists out of three parts (syntactic, cryptographic, semanticaverification).
-Besides verifing the SD additional tasks are executed (e.g., parsing, claim extraction).
+The verification of SDs consists out of three parts (syntactic, cryptographic, semantic verification).
+Besides verifying the SD additional tasks are executed (e.g., parsing, claim extraction).
 
-The syntactic verification is done by parsing the SD. 
+The syntactic verification is done by parsing the SD.
 Any syntactic issue will rise there.
 The semantic verification is conducted after the parsing of the Self-Description.
 
-The uploaded Self-Descriptions are checked against a composite schema of type SHACL.
-If a Self-Description is not conforming against the composite schema, a verification exception will be
-thrown with a message containing the validation report that holds the cause. In that case,
-the verification process will not proceed, and claims will not be extracted.
+As specified by CAT-FR-SF-04, automatic schema validation against stored SHACL shapes has been **disabled in the upload verification flow**. Self-Descriptions are accepted regardless of their conformity to stored SHACL shapes. On-demand schema validation of stored assets against specific SHACL shapes is available through the dedicated `SchemaValidationService` (see <<_schema_validation_service>>) and will be exposed via a dedicated endpoint as part of CAT-FR-CO-05.
+
+NOTE: For backward compatibility, automatic schema validation during upload can be re-enabled via the configuration property `federated-catalogue.verification.schema=true`.
 
 The cryptographic verification (trust verification) checks all proofs in the SD if the signature, the offered key and the content match.
 Further, the key is validated against the Gaia-X Registry.
-When checking whether the proofs match the Self-Description or the contained Verifiable Credentials, the JSON object is normalized using the Universal RDF Dataset Canonicalization Algorithm URDNA2015footnote:[https://w3c-ccg.github.io/rdf-dataset-canonicalization/spec/#dfn-urdna2015[RDF Dataset Canonicalization. A Standard RDF Dataset Canonicalization Algorithm. W3C, Final Community Group Report 15 October 2022]] as specified by Gaia-X. 
+When checking whether the proofs match the Self-Description or the contained Verifiable Credentials, the JSON object is normalized using the Universal RDF Dataset Canonicalization Algorithm URDNA2015footnote:[https://w3c-ccg.github.io/rdf-dataset-canonicalization/spec/#dfn-urdna2015[RDF Dataset Canonicalization. A Standard RDF Dataset Canonicalization Algorithm. W3C, Final Community Group Report 15 October 2022]] as specified by Gaia-X.
 This allows a robust signing of Self-Descriptions.
 The normalization algorithm extracts the RDF graph from the claim to perform the signing.
 Thus, the Self-Description can be changed (in some specific manners) while the signature remains.
@@ -898,7 +897,7 @@ sequenceDiagram
     VerificationService --> VerificationService:[Verify Syntax]
     VerificationService --> VerificationService:[Verify Semantic]
     VerificationService ->> VerificationService:[Extract SD Type]
-    VerificationService --> VerificationService:[Verify Schema]
+    Note over VerificationService: Schema validation disabled (CAT-FR-SF-04)
     VerificationService --> VerificationService:[Verify Signatures]
     VerificationService ->> VerificationService:[Extract Claims]
     VerificationService ->> VerificationService:[Extract Participant]
