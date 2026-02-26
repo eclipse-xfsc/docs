@@ -13,13 +13,13 @@ ifndef::imagesdir[:imagesdir: ../../images]
 
 == Deployment View
 
-The Federated Catalogue is provided as a container based application. The different components are shown in <<img_deployment_view>>. The main component is the `Federated Catalogue Server`. It requires a PostgreSQL-Serverfootnote:[https://www.postgresql.org/[PostgreSQL: The world's most advanced open source database]] instance to store Self-Description metadata and a Neo4jfootnote:[https://neo4j.com/[Neo4j Graph Data Platform | Graph Database Management System]] instance to store the Self-Description graph and to support the query interface of the catalogue.
+The Federated Catalogue is provided as a container based application. The different components are shown in <<img_deployment_view>>. The main component is the `Federated Catalogue Server`. It requires a PostgreSQL-Serverfootnote:[https://www.postgresql.org/[PostgreSQL: The world's most advanced open source database]] instance to store Self-Description metadata and a graph database instance to store the Self-Description graph and to support the query interface of the catalogue. The graph database backend is pluggable, selected via the `graphstore.impl` configuration property. Supported backends are Neo4jfootnote:[https://neo4j.com/[Neo4j Graph Data Platform | Graph Database Management System]] (openCypher queries) and Apache Jena Fusekifootnote:[https://jena.apache.org/documentation/fuseki2/[Apache Jena Fuseki]] (SPARQL-star queries).
 
 [#img_deployment_view,reftext='Figure {counter:refnum}']
 image::07_deployment_view.png[title="Deployment View"]
 
 In addition, a Keycloak instance is needed to handle authentication. Keycloak, as well as the portal, used to interact with the Federated Catalogue, is considered out of scope for the Federated Catalogue itself.
 
-<<img_deployment_view>> shows the default ports for the components' interaction. The connection settings (hostnames, ports) are configurable. It is recommended to replace the default credentials. To store persistent data, the `Federated Catalogue Server`, `PostgreSQL` as well as `Neo4J` require a volume, which must be mounted into the container.
+<<img_deployment_view>> shows the default ports for the components' interaction. The connection settings (hostnames, ports) are configurable. It is recommended to replace the default credentials. To store persistent data, the `Federated Catalogue Server`, `PostgreSQL` as well as the graph database (Neo4j or Fuseki) require a volume, which must be mounted into the container.
 
 Kubernetesfootnote:[https://kubernetes.io/[Kubernetes]] is the recommended infrastructure for production deployment. For development, Dockerfootnote:[https://www.docker.com/[Docker: Accelerated, Containerized Application Development]] in combination with docker-compose can be used.

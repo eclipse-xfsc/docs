@@ -18,7 +18,7 @@ Data is persisted in the following components:
 
 * Federated Catalogue Server: Self-Description and Schema files (Filesystem)
 * Metadata Store: Self-Description and Schema metadata (PostgreSQL)
-* Graph store: Self-Description graph (Neo4j)
+* Graph store: Self-Description graph (Neo4j or Fuseki, depending on `graphstore.impl` configuration)
 
 During the deployment it must be ensured that volumes are mounted to store the persistent data in the mentioned components.
 

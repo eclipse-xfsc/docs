@@ -74,9 +74,21 @@ The Graph Database can be considered as a kind of search index. The single sourc
 
 Generically returning the Self-Description files containing claims that influence query response is not possible. To get the relevant Self-Description files, the query to the Graph Database can be formulated to return the Gaia-X entity that is the __credentialSubject__ of a Verifiable Credential. Then this can be used as a filter for the Self-Description endpoint, to download the Self-Description file.
 
-Neo4j is used as implementation of the Graph database.
+The graph database backend is **pluggable**. The implementation is selected via the `graphstore.impl` configuration property:
 
-[IMPORTANT] 
+[options="header",cols="1,2,2"]
+|===
+| Value | Backend | Query Language
+| `neo4j` | Neo4j (default) | openCypher
+| `fuseki` | Apache Jena Fuseki | SPARQL-star
+| `dummy` | No-op (for testing) | —
+|===
+
+Both backends implement the same `GraphStore` interface. Core services contain no backend-specific logic.
+
+===== Neo4j backend
+
+[IMPORTANT]
 .Limitation: queries to non-Enterprise Neo4j Graph database return empty record when no results found, rather than empty list.
 ====
 When there is no data in the Graph database, i.e., no claims extracted from Self-Description, there is still a configuration node for the neosemantics modulefootnote:[https://neo4j.com/labs/neosemantics/4.0/config/[Configuring Neo4j to use RDF data]], which enables Neo4j to support the RDF data model, which is required here.
@@ -88,6 +100,10 @@ DENY MATCH {*} ON GRAPH neo4j NODES _GraphConfig TO PUBLIC
 However this revoke operation is only supported in Neo4j enterprise.footnote:[https://neo4j.com/docs/cypher-manual/current/access-control/manage-privileges/#access-control-graph-privileges[Neo4j Cypher Manual 5. Managing privileges. Graph privilege commands.]]
 We chose not to implement a workaround that involves query rewriting, as this may have harmful side effects.
 ====
+
+===== Fuseki backend
+
+The Fuseki backend uses Apache Jena with RDF-star. Claims are stored as RDF-star triple nodes: `<< subject predicate object >> cred:credentialSubject credentialSubjectUri`. Queries must use SPARQL-star syntax. Results are shuffled unless the query contains an `ORDER BY` clause.
 
 ==== File Store
 The File Store is responsible to persist all file based content submitted to the catalogue. These are Self-Descriptions and Schemas.
@@ -249,7 +265,7 @@ This component is used by the _Verification Service_ to extract Claims from Self
 
 ==== Graph Store
 
-The Graph Store is the interface for interacting with the Graph Database. It receives claims (extracted from Self-Descriptions) and adds them to the graph database. The Graph Database only contains claims from active Self-Descriptions and offers an openCypher query interface. External ontologies are not queried when processing requests.
+The Graph Store is the interface for interacting with the Graph Database. It receives claims (extracted from Self-Descriptions) and adds them to the graph database. The Graph Database only contains claims from active Self-Descriptions and offers a query interface (openCypher for the Neo4j backend, SPARQL-star for the Fuseki backend). External ontologies are not queried when processing requests.
 
 [source,java]
 ----

@@ -15,6 +15,8 @@ ifndef::imagesdir[:imagesdir: ../../images]
 
 These examples demonstrate how to interact with the xref:05_building_block_view#_graph_database[Graph Database].
 
+NOTE: The examples below use **openCypher** syntax, which applies to the **Neo4j** backend (`graphstore.impl=neo4j`). When using the **Fuseki** backend (`graphstore.impl=fuseki`), equivalent queries must be expressed in **SPARQL-star** syntax via the `POST /query?queryLanguage=SPARQL` endpoint. See <<sparql_star_examples>> for SPARQL-star equivalents.
+
 All of the following examples have the same structure:
 
 Data::
@@ -278,4 +280,45 @@ MATCH (n:ServiceOffering) WHERE n.name = "Elastic Search DB" RETURN n.uri LIMIT 
 
 ----
 [{n.uri=http://w3id.org/gaia-x/indiv#serviceElasticSearch.json}]
+----
+
+[[sparql_star_examples]]
+==== SPARQL-star Examples (Fuseki backend)
+
+The following examples show equivalent queries for the Fuseki backend using SPARQL-star syntax. These are sent via `POST /query?queryLanguage=SPARQL`.
+
+===== All triples
+
+Retrieve all triples stored in the graph:
+
+[source,sparql]
+----
+SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 100
+----
+
+===== All claims with credential subject
+
+Retrieve all Self-Description claims together with the credential subject they belong to, using RDF-star syntax:
+
+[source,sparql]
+----
+PREFIX cred: <https://www.w3.org/2018/credentials#>
+SELECT ?s ?p ?o ?cs
+WHERE {
+  << ?s ?p ?o >> cred:credentialSubject ?cs
+}
+LIMIT 100
+----
+
+===== Claims for a specific credential subject
+
+Retrieve claims belonging to a specific Self-Description:
+
+[source,sparql]
+----
+PREFIX cred: <https://www.w3.org/2018/credentials#>
+SELECT ?s ?p ?o
+WHERE {
+  << ?s ?p ?o >> cred:credentialSubject <http://example.org/my-credential-subject>
+}
 ----
