@@ -11,7 +11,8 @@ RUN apk add --no-cache nodejs npm chromium font-noto \
     && npm install -g @mermaid-js/mermaid-cli \
     && npm cache clean --force
 
-# Puppeteer config for mmdc: --no-sandbox is required when running as root in a container.
+# Puppeteer config for mmdc: --no-sandbox is required inside containers due to
+# Linux kernel namespace restrictions (applies to root and non-root users alike).
 RUN cat <<'EOF' > /usr/local/share/puppeteer-config.json
 {
   "executablePath": "/usr/bin/chromium-browser",
@@ -26,3 +27,7 @@ RUN REAL_MMDC=$(which mmdc) \
     && mv "$REAL_MMDC" "${REAL_MMDC}.real" \
     && printf '#!/bin/sh\nexec "$(dirname "$0")/mmdc.real" -p /usr/local/share/puppeteer-config.json "$@"\n' > "$REAL_MMDC" \
     && chmod +x "$REAL_MMDC"
+
+# Run as a non-root user to reduce the attack surface of the container.
+RUN addgroup -S asciidoc && adduser -S -G asciidoc asciidoc
+USER asciidoc
