@@ -19,7 +19,12 @@ The Catalogue is not directly accessed by end usersfootnote:[Here, this term com
 
 Authentication within the Federation is realized by a dedicated component. It is not part of the Federated Catalogue. To demonstrate the integration, the Federated Catalogue offers an Authentication component, based on common, off the shelf software (see section <<_authentication>>).
 
-The Federated Catalogue offers the possibility to verify Self-Descriptions. Signatures in Self-Descriptions are always verified cryptographically: the public key is downloaded and the signature is checked against the content.  Optionally, the Federated Catalogue can be configured to enforce Gaia-X Trust Framework validation (see <<_trust_framework_configuration>>). When enabled, the X.509 certificate belonging to the public key is additionally validated against the Gaia-X Trust Anchor Registry to ensure it has a valid trust anchor chain.  By default, this Trust Framework validation is **disabled**, allowing the catalogue to be used in ecosystems that do not require Gaia-X compliance.
+The Federated Catalogue offers the possibility to verify Self-Descriptions. The verification pipeline consists of four independently configurable stages: syntactic parsing, semantic validation, schema validation (SHACL), and cryptographic signature verification. Each stage can be enabled or disabled via configuration properties.
+
+The catalogue supports two deployment profiles (see <<_verification_profiles>>):
+
+* **Default profile:** Only semantic validation is active. Signature verification is disabled because without the Gaia-X Trust Framework, signatures only prove internal consistency (that a DID controls a key) but cannot establish identity, trust, or accountability (see ADR 3). This allows the catalogue to be used in ecosystems that do not require Gaia-X compliance and eliminates the need for DID resolution infrastructure.
+* **Strict profile:** All verification stages are active, including signature verification with Gaia-X Trust Framework validation. This matches the original implementation behaviour and requires DID resolution infrastructure, certificate chains, and a trust anchor registry.
 
 [#system_overview,reftext='Figure {counter:refnum}']
 .System Overview
@@ -764,33 +769,143 @@ erDiagram
 
 ....
 
-[[_trust_framework_configuration]]
-==== Trust Framework Configuration
+[[_verification_profiles]]
+==== Verification Profiles
 
-The Federated Catalogue can be operated with or without Gaia-X Trust Framework validation. By default, Trust Framework validation is **disabled**, allowing the catalogue to store any valid Verifiable Credential/Presentation without requiring Gaia-X compliance.
-
-The following configuration properties control this behavior:
+The verification pipeline has four independently configurable stages. Each stage is controlled by a dedicated configuration property:
 
 [options="header",cols="2,1,3"]
 |===
 | Property | Default | Description
-| `federated-catalogue.verification.trust-framework.gaiax.enabled` | `false` | Enable/disable Gaia-X Trust Framework validation
+| `federated-catalogue.verification.semantics` | `true` | Validate credential subject `@type` against loaded ontologies
+| `federated-catalogue.verification.schema` | `false` | Validate against SHACL shapes (composite schema)
+| `federated-catalogue.verification.vp-signature` | `false` | Verify Verifiable Presentation proof (JWS)
+| `federated-catalogue.verification.vc-signature` | `false` | Verify Verifiable Credential proof (JWS)
+| `federated-catalogue.verification.trust-framework.gaiax.enabled` | `false` | Enforce Gaia-X Trust Framework compliance (trust anchor chain)
 | `federated-catalogue.verification.trust-framework.gaiax.trust-anchor-url` | _(Gaia-X registry URL)_ | URL for the Gaia-X Trust Anchor Registry (only used when enabled)
+| `federated-catalogue.verification.signature-verifier` | `uni-res` | DID resolution strategy: `local` (resolve did:web directly) or `uni-res` (Universal Resolver)
 |===
 
-**When disabled (default):**
+Two deployment profiles are pre-configured. Operators may also define custom combinations.
 
-* Credentials can be uploaded without Gaia-X compliance validation
-* No calls are made to the Gaia-X Trust Anchor Registry
-* Signature verification still works but does not require Gaia-X trust anchors or an `x5u` URL in the JWK
-* Any valid Verifiable Credential/Presentation can be stored
+===== Default profile
 
-**When enabled:**
+The default profile enables **semantic validation only**. Signature verification is disabled because without the trust framework, it provides no meaningful security — a signature only proves that whoever controls a DID also controls the corresponding private key, but does not establish the signer's identity or trustworthiness (see ADR 3).
 
-* Full Gaia-X Trust Framework validation is enforced
-* Credentials must have valid trust anchor chains registered with Gaia-X
-* Calls are made to the Gaia-X Trust Anchor Registry for validation
-* The `trust-anchor-url` must be configured
+[options="header",cols="1,1"]
+|===
+| Stage | Status
+| Syntactic parsing | Always active
+| Semantic validation | *Active*
+| Schema validation (SHACL) | Disabled
+| Signature verification | *Disabled*
+| Trust framework (Gaia-X) | Disabled
+|===
+
+**Capabilities:** Credentials can be uploaded without signatures, without Gaia-X compliance, and without DID resolution infrastructure. The catalogue validates structure and ontology conformance only. No trust anchor registry or certificate chain is required.
+
+**Infrastructure required:** PostgreSQL, Neo4j (or Fuseki), Keycloak, NATS.
+
+[mermaid, width=2000]
+....
+flowchart LR
+    subgraph defaultProfile ["Default Profile"]
+        direction LR
+        A(Parse JSON +\nCheck syntax) --> B(Validate against\nJSON-LD Grammar)
+        B --> C(Validate against VC standard)
+        C --> D(Extract SD Type)
+        D --> E([Extract Claims])
+        E --> F([Extract Participant])
+    end
+    style defaultProfile fill:#e8f5e9,stroke:#4caf50
+....
+
+===== Strict profile
+
+The strict profile enables **all verification stages**, matching the original 2.0.0 implementation behaviour. Signature verification is meaningful here because it is coupled with the Gaia-X Trust Framework, which validates the `x5u` certificate chain against the Trust Anchor Registry — binding the cryptographic identity to a vetted legal entity.
+
+[options="header",cols="1,1"]
+|===
+| Stage | Status
+| Syntactic parsing | Always active
+| Semantic validation | *Active*
+| Schema validation (SHACL) | *Active*
+| Signature verification | *Active*
+| Trust framework (Gaia-X) | *Active*
+|===
+
+**Capabilities:** Full Gaia-X compliance enforcement. Credentials must be signed with a `did:web` key whose DID document contains an `x5u` URL pointing to a valid certificate chain registered in the Trust Anchor Registry.
+
+**Infrastructure required:** PostgreSQL, Neo4j (or Fuseki), Keycloak, NATS, DID resolver (local or Universal Resolver), certificate chain hosting, trust anchor registry.
+
+[mermaid, width=2000]
+....
+flowchart LR
+    subgraph strict ["Strict Profile"]
+        direction LR
+        A(Parse JSON +\nCheck syntax) --> B(Validate against\nJSON-LD Grammar)
+        B --> C(Validate against VC standard)
+        C --> D(Extract SD Type)
+        D --> E(Validate against\nSHACL shapes)
+        E --> F(Verify VP + VC\nsignatures)
+        F --> G(Resolve DID +\ncheck public key)
+        G --> H(Validate x5u cert chain\nagainst Trust Anchor Registry)
+        H --> I([Extract Claims])
+        I --> J([Extract Participant])
+    end
+    style strict fill:#fff3e0,stroke:#ff9800
+....
+
+===== Profile comparison
+
+[mermaid, width=2000]
+....
+flowchart TB
+    subgraph legend [" "]
+        direction LR
+        L1(Active in both profiles)
+        L2(Strict profile only)
+        L3([Data extraction — always runs])
+    end
+    style L1 fill:#e8f5e9,stroke:#4caf50
+    style L2 fill:#fff3e0,stroke:#ff9800
+    style L3 fill:#e3f2fd,stroke:#42a5f5
+
+    subgraph pipeline ["Verification Pipeline"]
+        direction TB
+        P[Parse JSON + Check syntax] --> SEM[Semantic validation\n— ontology type check]
+        SEM --> SCH{Schema validation\nenabled?}
+        SCH --> |yes| SHACL(Validate against\nSHACL composite schema)
+        SCH --> |no| SIG
+        SHACL --> SIG{Signature verification\nenabled?}
+        SIG --> |yes| VPVC(Verify VP + VC proofs)
+        SIG --> |no| EXT
+        VPVC --> TF{Gaia-X Trust Framework\nenabled?}
+        TF --> |yes| TA(Validate against\nTrust Anchor Registry)
+        TF --> |no| EXT
+        TA --> EXT([Extract Claims +\nExtract Participant])
+    end
+
+    style P fill:#e8f5e9,stroke:#4caf50
+    style SEM fill:#e8f5e9,stroke:#4caf50
+    style SHACL fill:#fff3e0,stroke:#ff9800
+    style VPVC fill:#fff3e0,stroke:#ff9800
+    style TA fill:#fff3e0,stroke:#ff9800
+    style EXT fill:#e3f2fd,stroke:#42a5f5
+....
+
+===== Docker Compose configuration
+
+The default profile uses `docker-compose.yml` with `dev.env`. The strict profile adds the `docker-compose.strict.yml` overlay, which sets all verification flags to `true`:
+
+[source,bash]
+----
+# Default profile
+docker compose --env-file dev.env up
+
+# Strict profile
+docker compose -f docker-compose.yml -f docker-compose.strict.yml --env-file dev.env up
+----
 
 === Level 3: Shared data structures
 

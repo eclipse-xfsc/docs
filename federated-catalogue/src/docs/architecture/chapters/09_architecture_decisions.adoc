@@ -28,3 +28,26 @@ Therefore, the Federated Catalogue is considered as microservice application wit
 
 **Decision:** The Catalogue es a static, pre-specified and configured component. Adding plugins during runtime is not needed. The maintainability of the catalogue is more important than additional flexibility.
 
+=== ADR 3: Disable Signature Verification by Default
+
+**Context:** The verification pipeline has four independent flags: `semantics`, `schema`, `vp-signature`, and `vc-signature`. Signature verification resolves the `verificationMethod` DID, retrieves the public key, and verifies the JWS proof. However, without the Gaia-X trust framework (`gaiax.enabled=true`), the `x5u` certificate chain that binds the DID to a vetted legal entity is never validated.
+
+Without the trust anchor chain, signature verification only proves internal consistency (the credential was signed by whoever controls that DID) and tamper detection (the payload has not been modified). It does not establish identity, trust, or accountability — anyone can create a `did:web` on a server they control and sign arbitrary claims.
+
+This makes signature verification without trust anchor enforcement ineffective as a security measure. Meanwhile, keeping signatures enabled by default forces all deployments to stand up DID resolution infrastructure even when not using the Gaia-X trust framework.
+
+**Decision:** Disable `vp-signature` and `vc-signature` in the default application profile (`application.yml`). Signature verification is re-enabled in the strict deployment profile alongside the full trust framework (Gaia-X enabled, schema validation, trust anchor registry).
+
+[cols="1,1,1"]
+|===
+| Flag | Default profile | Strict profile
+
+| `semantics` | `true` | `true`
+| `schema` | `false` | `true`
+| `vp-signature` | `false` | `true`
+| `vc-signature` | `false` | `true`
+| `gaiax.enabled` | `false` | `true`
+|===
+
+This aligns with CAT-FR-SF-04 (remove forced validation): validation flags that provide no security value without the trust framework should not be forced by default. Production deployments must explicitly enable signatures together with the trust framework.
+
