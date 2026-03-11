@@ -571,7 +571,7 @@ sequenceDiagram
     VerificationService --> VerificationService:[Verify Syntax]
     VerificationService --> VerificationService:[Verify Semantic]
     VerificationService --> VerificationService:[Extract SD Type]
-    VerificationService --> VerificationService:[Verify Schema]
+    Note over VerificationService: Schema validation disabled by default (verifySchema=false)
     VerificationService --> VerificationService:[Verify Signatures]
     VerificationService --> VerificationService:[Extract Participant]
     VerificationService --> VerificationService:[Extract Claims]
@@ -806,10 +806,20 @@ sequenceDiagram
     participant API
     participant VerificationService
     User ->> + API:POST /verifications/self-descriptions
-    API ->> + VerificationService:verifySelfDescription(sd)
+    API ->> + VerificationService:verifySelfDescription(sd, verifySemantics, verifySchema, verifyVPSig, verifyVCSig)
     VerificationService --> VerificationService:[Verify Syntax]
-    VerificationService --> VerificationService:[Verify Signatures]
-    VerificationService --> VerificationService:[Verify Schema]
+    opt verifySemantics (default true)
+        VerificationService --> VerificationService:[Verify Semantic]
+        VerificationService ->> VerificationService:[Extract SD Type]
+    end
+    opt verifySchema (default false)
+        VerificationService ->> SchemaValidationService:[Validate Claims vs SHACL]
+        SchemaValidationService -->> VerificationService:SemanticValidationResult
+    end
+    opt verifyVPSig / verifyVCSig (default true)
+        VerificationService --> VerificationService:[Verify Signatures]
+    end
+    VerificationService ->> VerificationService:[Extract Claims]
     VerificationService -->> - API:VerificationResult
     API -->> -User: VerificationResult
 ....
@@ -873,19 +883,20 @@ sequenceDiagram
 
 ==== Verify Self-Description
 
-The verification of SDs consists out of three parts (syntactic, cryptographic, semanticaverification).
-Besides verifing the SD additional tasks are executed (e.g., parsing, claim extraction).
+The verification of SDs consists of four parts (syntactic, semantic, schema, and trust verification).
+Besides verifying the SD additional tasks are executed (e.g., parsing, claim extraction).
 
-The syntactic verification is done by parsing the SD. 
+`VerificationServiceImpl` acts as a thin Context in the Strategy pattern: it resolves per-request verification toggles and delegates all verification and claim extraction logic to a `VerificationStrategy` (currently `CredentialVerificationStrategy`). The strategy contains the full VP/VC parsing, semantic validation, schema validation, signature verification, and claim extraction logic. See <<_verification_strategy_pattern>> for details.
+
+The syntactic verification is done by parsing the SD.
 Any syntactic issue will rise there.
 The semantic verification is conducted after the parsing of the Self-Description.
 
-The uploaded Self-Descriptions are checked against a composite schema of type SHACL.
-If a Self-Description is not conforming against the composite schema, a verification exception will be
-thrown with a message containing the validation report that holds the cause. In that case,
-the verification process will not proceed, and claims will not be extracted.
+Automatic schema validation against stored SHACL shapes has been **disabled in the upload verification flow**. Self-Descriptions are accepted regardless of their conformity to stored SHACL shapes. On-demand schema validation of stored assets against specific SHACL shapes is available through the dedicated `SchemaValidationService` (see <<_schema_validation_service>>).
 
-The cryptographic verification (trust verification) checks all proofs in the SD if the signature, the offered key and the content match.
+NOTE: For backward compatibility, automatic schema validation during upload can be re-enabled via the configuration property `federated-catalogue.verification.schema=true`.
+
+The trust verification checks all proofs in the SD if the signature, the offered key and the content match.
 When Gaia-X Trust Framework validation is enabled, the key is additionally validated against the Gaia-X Trust Anchor Registry to verify a valid trust anchor chain.  When this setting is disabled (the default), signature verification still ensures that signatures are valid and match the content.
 When checking whether the proofs match the Self-Description or the contained Verifiable Credentials, the JSON object is normalized using the Universal RDF Dataset Canonicalization Algorithm URDNA2015footnote:[https://w3c-ccg.github.io/rdf-dataset-canonicalization/spec/#dfn-urdna2015[RDF Dataset Canonicalization. A Standard RDF Dataset Canonicalization Algorithm. W3C, Final Community Group Report 15 October 2022]] as specified by Gaia-X.
 This allows a robust signing of Self-Descriptions.
@@ -902,15 +913,11 @@ sequenceDiagram
     VerificationService --> VerificationService:[Verify Syntax]
     VerificationService --> VerificationService:[Verify Semantic]
     VerificationService ->> VerificationService:[Extract SD Type]
-    VerificationService --> VerificationService:[Verify Schema]
+    Note over VerificationService: Schema validation disabled by default
     VerificationService --> VerificationService:[Verify Signatures]
     VerificationService ->> VerificationService:[Extract Claims]
     VerificationService ->> VerificationService:[Extract Participant]
 ....
-
-image:06_verification_flow.png[Verification Workflow]
-////
-This is the source code for the figure above. Directly added the figure due to a bug in mmdc
 
 [mermaid, width=2000]
 ....
@@ -925,8 +932,10 @@ flowchart LR
     end
     subgraph three [Schema Validation]
         direction TB
-        threeA([Extract Claims])
-        threeA --> threeB(Check claims vs SHACL)
+        threeA{{verification.schema <br> enabled?}}
+        threeA --> |yes| threeB([Extract Claims])
+        threeB --> threeC(Check claims vs SHACL <br> via SchemaValidationService)
+        threeA --> |no — default| threeD([Skip schema validation])
     end
     subgraph four [Trust Verification]
         direction TB
@@ -950,4 +959,4 @@ flowchart LR
         C{{Configuration-dependent step}}
     end
 ....
-////
+

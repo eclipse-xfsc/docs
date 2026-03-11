@@ -20,6 +20,12 @@ The requirements for implementing the Gaia-X Federated Catalogue are given in it
 * The specification of a requirement turned out to be unsatisfiable for conceptual or practical reasons.
 * The understanding of an underlying concept had evolved during the further work of the Gaia-X Technical Committee and its working groups after the original publication of the requirements specification.
 
+The catalogue specification has been updated with new requirements, identified by IDs starting with CAT-FR-*.
+While these requirements are not fully implemented yet, they are planned to be completed by 2026.
+The catalogue's architecture is designed to support the implementation of these new requirements.
+In cases of conflict, the newer requirements take precedence over the older ones.
+
+For more details, refer to the document "Enhancement of the XFSC Federated Catalogue" footnote:[Enhancement of the XFSC Federated Catalogue. 2025. https://github.com/eclipse-xfsc/docs/blob/9a178c30f76610e5924fd72c39d259d6a8ae0461/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf].
 
 === Quality Goals
 
