@@ -70,3 +70,25 @@ This aligns with CAT-FR-SF-04 (remove forced validation): validation flags that 
 
 **Rationale:** Reusing the existing endpoint and metadata infrastructure avoids duplication of lifecycle management, filtering, pagination, and access control. The `RdfDetector` allowlist gives operators explicit control over which content types trigger verification. Separate File Store instances keep asset blobs isolated from schema caches for operational clarity.
 
+=== ADR 5: Fine-Grained Permission-Based Authorization
+
+**Context:** The original authorization model used four coarse-grained roles (Ro-MU-CA, Ro-MU-A, Ro-SD-A, Ro-PA-A) to control API access. This presented several limitations:
+
+1. **No read-level control.** Self-description and schema read endpoints were open to any authenticated user, with no way to restrict read access.
+2. **No separation of concerns.** The Ro-SD-A and Ro-MU-A roles granted full write access to self-descriptions, with no way to differentiate between create, update (revoke), and delete operations.
+3. **No schema write control.** Schema management was restricted only to Ro-MU-CA, with no intermediate access level for schema administrators.
+4. **No query access control.** The query endpoint was accessible to any authenticated user.
+
+Two approaches were considered:
+
+1. **Extend existing roles:** Add more coarse-grained roles (e.g., Ro-Schema-A). Simple but doesn't address the granularity problem and leads to role proliferation.
+2. **Fine-grained permissions with composite roles:** Define atomic permissions (ASSET_CREATE, ASSET_READ, etc.) and compose them into roles. Maximum flexibility while maintaining backward compatibility.
+
+**Decision:** Option 2 — fine-grained permission-based authorization.
+
+Ten atomic permissions are defined: `ASSET_CREATE`, `ASSET_READ`, `ASSET_UPDATE`, `ASSET_DELETE`, `SCHEMA_CREATE`, `SCHEMA_READ`, `SCHEMA_UPDATE`, `SCHEMA_DELETE`, `QUERY_EXECUTE`, and `ADMIN_ALL`. Each API endpoint requires a specific permission (or `ADMIN_ALL`). Permissions are implemented as Keycloak client roles and flow into Spring Security authorities via the existing `CustomJwtAuthenticationConverter`.
+
+Backward compatibility is maintained by converting the legacy roles (Ro-MU-CA, Ro-MU-A, Ro-SD-A) into Keycloak composite roles that include the appropriate permissions. Users with legacy roles automatically receive the corresponding fine-grained permissions without any migration.
+
+**Rationale:** Fine-grained permissions enable precise access control for multi-tenant deployments where different user groups need different levels of access to catalogue resources. The composite role mechanism ensures zero-disruption migration for existing deployments. No changes to JWT extraction or authentication infrastructure were required.
+

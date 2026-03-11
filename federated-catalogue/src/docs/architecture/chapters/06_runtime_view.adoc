@@ -521,8 +521,11 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     actor User
+    participant Auth as Authentication
     participant API
     participant SDStore as SelfDescriptionStorage
+    User ->> + Auth:Authorize(ASSET_READ | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API:GET /self-descriptions
     API ->> + SDStore: getByFilter()
     SDStore -->> - API: List<SelfDescriptionMetadata>
@@ -538,8 +541,11 @@ The __SelfDescriptionStorage__ must only return Self-Descriptions with __SelfDes
 sequenceDiagram
     autonumber
     actor User
+    participant Auth as Authentication
     participant API
     participant SDStore as SelfDescriptionStorage
+    User ->> + Auth:Authorize(ASSET_READ | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API:GET /self-descriptions
     API ->> + SDStore: getByFilter(SdFilter filterParams)
     SDStore -->> - API: List<SelfDescriptionMetadata, SelfDescription>
@@ -554,8 +560,11 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     actor User
+    participant Auth as Authentication
     participant API
     participant SDStore as SelfDescriptionStorage
+    User ->> + Auth:Authorize(ASSET_READ | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API:GET /self-descriptions/{self_description_hash}
     API ->> + SDStore: getByHash(String self_description_hash)
     SDStore -->> - API: SelfDescriptionMetadata<br>+SelfDescription
@@ -578,7 +587,7 @@ sequenceDiagram
     participant API
     participant VerificationService
     participant SDStore as SD-Storage
-    User ->> + Auth:Autorize( Ro-SD-A | Ro-MU-A | Ro-SD-A )
+    User ->> + Auth:Authorize(ASSET_CREATE | ADMIN_ALL)
     Auth -->> - User:[OK]
     User ->> + API:POST /self-descriptions
     API ->> + VerificationService:verifyOfferingSelfDescription(sd)
@@ -615,12 +624,15 @@ Non-RDF assets (PDFs, plain JSON, YAML, images, binary files) are uploaded throu
 sequenceDiagram
     autonumber
     actor User
+    participant Auth as Authentication
     participant API as AssetUploadController
     participant Service as AssetUploadService
     participant RdfDetector
     participant SDStore as SD-Storage
     participant FileStore as Asset FileStore
-    
+
+    User ->> + Auth:Authorize(ASSET_CREATE | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API:POST /self-descriptions (multipart/form-data or application/octet-stream)
     API ->> + Service:processUpload(bytes, contentType, filename)
     Service ->> + RdfDetector:isRdf(contentType, bytes)
@@ -661,7 +673,7 @@ sequenceDiagram
     participant Auth
     participant SDStore as SD-Storage
     User ->> + API:POST /self-descriptions/{self_description_hash}/revoke
-    API ->> + Auth:Autorize( Ro-SD-A | Ro-MU-A | Ro-SD-A )
+    API ->> + Auth:Authorize(ASSET_UPDATE | ADMIN_ALL)
     Auth -->> - API:[OK]
     API ->> + SDStore: getByHash(self_description_hash)
     SDStore -->> - API: SelfDescriptionMetadata
@@ -685,8 +697,11 @@ sequenceDiagram
 ....
 sequenceDiagram
     actor User
+    participant Auth as Authentication
     participant API
     participant SchemaStore as SchemaStore
+    User ->> + Auth:Authorize(SCHEMA_READ | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API:GET /schemas/latest
     API ->> + SchemaStore:getCompositeSchema(schemaType)
     SchemaStore ->> SchemaStore:generate Composite Schema
@@ -701,8 +716,11 @@ sequenceDiagram
 ....
 sequenceDiagram
     actor User
+    participant Auth as Authentication
     participant API
     participant SchemaStore as SchemaStore
+    User ->> + Auth:Authorize(SCHEMA_READ | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API:GET /schemas
     API ->> + SchemaStore:getSchemaList()
     SchemaStore ->> SchemaStore:load Schema IDs
@@ -717,8 +735,11 @@ sequenceDiagram
 ....
 sequenceDiagram
     actor User
+    participant Auth as Authentication
     participant API
     participant SchemaStore as SchemaStore
+    User ->> + Auth:Authorize(SCHEMA_READ | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API:GET /schemas/{schemaId}
     API ->> + SchemaStore:getSchema(schemaId)
     SchemaStore ->> SchemaStore:load Schema-file
@@ -733,8 +754,11 @@ sequenceDiagram
 ....
 sequenceDiagram
     actor User
+    participant Auth as Authentication
     participant API
     participant SchemaStore as SchemaStore
+    User ->> + Auth:Authorize(SCHEMA_READ | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API:GET /schemas/latest/{termURI}
     API ->> + SchemaStore:getSchemaForTerm(termURI)
     SchemaStore ->> SchemaStore:find Schema IDs
@@ -753,7 +777,7 @@ sequenceDiagram
     participant API as SchemasService
     participant SchemaStore as SchemaStoreImpl
     participant Filter as ProtectedNamespaceFilter
-    User ->> + Auth:Authenticate
+    User ->> + Auth:Authorize(SCHEMA_CREATE | ADMIN_ALL)
     Auth -->> - User:OK
     User ->> + API:POST /schemas
     API ->> + SchemaStore:addSchema(schemaFile)
@@ -787,7 +811,7 @@ sequenceDiagram
     participant Verification as VerificationService
     participant Revalidation as RevalidationService
     User ->> + API:PUT /schemas/{ID}
-    API ->> + Auth:Authenticate
+    API ->> + Auth:Authorize(SCHEMA_UPDATE | ADMIN_ALL)
     Auth -->> - API:OK
     API ->> + SchemaStore:updateSchema(ID, schema)
     SchemaStore ->> SchemaStore:[Parse RDF — JSON-LD / RDF-XML / TTL]
@@ -827,7 +851,7 @@ sequenceDiagram
     participant API as SchemasService
     participant SchemaStore as SchemaStoreImpl
     User ->> + API:DELETE /schemas/{schemaId}
-    API ->> + Auth:Authenticate
+    API ->> + Auth:Authorize(SCHEMA_DELETE | ADMIN_ALL)
     Auth -->> - API:OK
     API ->> + SchemaStore:deleteSchema(schemaId)
     SchemaStore ->> SchemaStore:[Remove schema from DB]
@@ -852,9 +876,12 @@ Only read queries are allowed. Write queries (e.g., `CREATE`/`DELETE` in openCyp
 sequenceDiagram
     autonumber
     actor User
+    participant Auth as Authentication
     participant API
     participant Validator as QueryLanguageValidator
     participant Graph as Graph-DB
+    User ->> + Auth:Authorize(QUERY_EXECUTE | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API: POST /query (Content-Type: application/opencypher-query or application/sparql-query)
     API ->> API: resolve language from Content-Type
     API ->> + Validator: validate(queryLanguage)
@@ -884,8 +911,11 @@ The `GET /query/info` endpoint returns metadata about the active graph database 
 sequenceDiagram
     autonumber
     actor User
+    participant Auth as Authentication
     participant API
     participant Graph as Graph-DB
+    User ->> + Auth:Authorize(QUERY_EXECUTE | ADMIN_ALL)
+    Auth -->> - User:OK
     User ->> + API: GET /query/info
     API ->> + Graph: getBackendType(), getSupportedQueryLanguage()
     Graph -->> - API: backendType, queryLanguage
