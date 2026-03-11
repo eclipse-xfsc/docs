@@ -174,22 +174,55 @@ The service component is responsible to call and orchestrate the different _fc-s
 
 ==== Authorization
 
-The authorization component is highly coupled with the _Controller_.  It ensures that endpoints only be can be called by users, having the correct role.
+The authorization component is highly coupled with the _Controller_. It ensures that API endpoints can only be called by users having the required permissions. It is implemented with Spring Security.
 
-Roles defined in the Catalogue:
+===== Fine-Grained Permissions
+
+Self-description, schema, and query endpoint access is controlled by fine-grained permissions:
+
 [options="header",cols="1,2"]
 |===
-| Role ID | Role Name
-| Ro-MU-CA | Catalogue Administrator
-| Ro-MU-A | Participant Administrator
-| Ro-SD-A | Self-Description Administrator
-| Ro-Pa-A | Participant User Administrator
+| Permission | Grants access to
+| ASSET_CREATE | Create self-descriptions and upload assets
+| ASSET_READ | Read and list self-descriptions and assets
+| ASSET_UPDATE | Revoke self-descriptions
+| ASSET_DELETE | Delete self-descriptions and assets
+| SCHEMA_CREATE | Create schemas
+| SCHEMA_READ | Read and list schemas
+| SCHEMA_UPDATE | Update schemas
+| SCHEMA_DELETE | Delete schemas
+| QUERY_EXECUTE | Execute catalogue queries (openCypher/SPARQL)
+| ADMIN_ALL | Full access to all operations
 |===
-These roles do not form a linear hierarchy.
 
-User Ro-MU-CA is allowed to execute all actions.
+Each API endpoint requires one specific permission (or `ADMIN_ALL`). Permissions are represented as Keycloak client roles on the `federated-catalogue` client and flow into Spring Security authorities via the JWT.
 
-It is implemented with Spring Security.
+===== Composite Roles
+
+For convenience and backward compatibility, composite roles bundle multiple permissions:
+
+[options="header",cols="1,2,3"]
+|===
+| Role ID | Role Name | Included Permissions
+| Ro-MU-CA | Catalogue Administrator | ADMIN_ALL (all permissions)
+| Ro-MU-A | Participant Administrator | ASSET_CREATE, ASSET_READ, ASSET_UPDATE, ASSET_DELETE, SCHEMA_READ
+| Ro-SD-A | Self-Description Administrator | ASSET_CREATE, ASSET_READ, ASSET_UPDATE, ASSET_DELETE, SCHEMA_READ
+| Ro-PA-A | Participant User Administrator | _(used for participant/user management only)_
+|===
+
+Additionally, five predefined task-specific composite roles are available:
+
+[options="header",cols="1,2"]
+|===
+| Role | Included Permissions
+| asset-reader | ASSET_READ, SCHEMA_READ, QUERY_EXECUTE
+| asset-creator | ASSET_CREATE, ASSET_READ, SCHEMA_READ, QUERY_EXECUTE
+| asset-editor | ASSET_CREATE, ASSET_READ, ASSET_UPDATE, SCHEMA_READ, QUERY_EXECUTE
+| asset-manager | ASSET_CREATE, ASSET_READ, ASSET_UPDATE, ASSET_DELETE, SCHEMA_READ, QUERY_EXECUTE
+| schema-manager | SCHEMA_CREATE, SCHEMA_READ, SCHEMA_UPDATE, SCHEMA_DELETE, ASSET_READ
+|===
+
+Participant and user management endpoints continue to use the legacy roles directly (Ro-MU-CA, Ro-MU-A, Ro-PA-A).
 
 ==== Core Services (fc-service-core)
 
