@@ -50,9 +50,21 @@ When content is submitted, an `RdfDetector` component classifies it as either RD
 
 The set of MIME types treated as RDF is configurable via `federated-catalogue.rdf.content-types`. Operators can adjust this allowlist to match their deployment's verification capabilities.
 
-==== Identification of Non-RDF Assets
+==== Asset IRI Assignment
 
-Non-RDF assets do not have a `credentialSubject`. Instead, they receive an auto-generated identifier based on their content hash: `urn:asset:sha256:<hash>`. The prefix is configurable via `federated-catalogue.asset.subject-id-prefix`. This ensures stable, content-addressable identifiers and built-in deduplication — uploading the same content twice results in a conflict (HTTP 409).
+Every asset in the catalogue MUST be identified by an IRI, in compliance with requirement CAT-FR-AM-02: Each Asset MUST be identified by an IRI. DIDs and UUIDs as URNs (RFC 4122) MUST be supported.footnote:[Enhancement of the XFSC Federated Catalogue. 2025. https://github.com/eclipse-xfsc/docs/blob/9a178c30f76610e5924fd72c39d259d6a8ae0461/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf]. The supported IRI formats are:
+
+* **DIDs** — e.g., `did:web:example.com`, `did:key:z6Mk...` (extracted from RDF credential content)
+* **UUID URNs** — e.g., `urn:uuid:550e8400-e29b-41d4-a716-446655440000` (generated per RFC 4122footnote:[https://www.rfc-editor.org/rfc/rfc4122[RFC 4122 — A Universally Unique IDentifier (UUID) URN Namespace]])
+* **Generic URNs** — e.g., `urn:nid:nss`
+* **HTTP/HTTPS IRIs** — e.g., `https://example.org/resource/123`
+
+IRI assignment is handled by the `IriGenerator` component and validated by the `IriValidator` component (see <<section-building-block-viev>>). The assignment strategy depends on the asset type:
+
+* **RDF assets (credentials):** The IRI is extracted from the content — `credentialSubject.id` for Verifiable Credentials, or `@id` for generic JSON-LD. OWL ontologies, SHACL shapes, and SKOS concept schemes use their respective root identifiers. If no IRI can be extracted, a UUID URN is generated as fallback.
+* **Non-RDF assets:** A UUID URN (`urn:uuid:...`) is generated automatically. Each upload receives a unique identifier per RFC 4122.
+
+All IRIs are validated on assignment. Invalid formats (null, blank, or syntactically malformed) are rejected. Duplicate content detection still applies — uploading the same content twice results in a conflict (HTTP 409), with the existing IRI returned in the error response.
 
 ==== Storage Strategy
 

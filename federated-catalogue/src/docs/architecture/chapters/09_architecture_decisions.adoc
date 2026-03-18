@@ -66,7 +66,7 @@ This aligns with CAT-FR-SF-04 (remove forced validation): validation flags that 
 * RDF content follows the existing verification + graph storage path.
 * Non-RDF content bypasses verification and graph storage entirely. It is stored in a dedicated `assetFileStore` (separate directory from schema/context caches) with metadata in the `assets` table.
 * Three columns are added to `assets`: `content_type` (VARCHAR), `file_size` (BIGINT), `original_filename` (VARCHAR). The `content` column is made nullable (non-RDF assets store content only in the File Store).
-* Non-RDF assets receive auto-generated identifiers: `urn:asset:sha256:<content-hash>`.
+* Non-RDF assets receive auto-generated IRI identifiers: UUID URNs (`urn:uuid:...`) per RFC 4122, assigned by `IriGenerator` (see ADR 7).
 
 **Rationale:** Reusing the existing endpoint and metadata infrastructure avoids duplication of lifecycle management, filtering, pagination, and access control. The `RdfDetector` allowlist gives operators explicit control over which content types trigger verification. Separate File Store instances keep asset blobs isolated from schema caches for operational clarity.
 
@@ -142,4 +142,25 @@ Key concepts:
 |===
 
 **Rationale:** Naming for the current scope avoids premature abstraction. The rename to `RdfClaim` is deferred to the story (CAT-FR-GD-02) that actually introduces non-credential claim extraction, following a "name for what it is now, rename when scope expands" principle. This keeps each rename tied to a concrete implementation change rather than a speculative future.
+
+=== ADR 7: IRI-Based Asset Identification
+
+**Context:** CAT-FR-AM-02: Each Asset MUST be identified by an IRI. DIDs and UUIDs as URNs (RFC 4122) MUST be supported.footnote:[Enhancement of the XFSC Federated Catalogue. 2025. https://github.com/eclipse-xfsc/docs/blob/9a178c30f76610e5924fd72c39d259d6a8ae0461/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf] The previous implementation used content-hash-based identifiers (`urn:asset:sha256:<hash>`) for non-RDF assets and `credentialSubject` for RDF credentials. Three approaches were considered:
+
+1. **Keep hash-based identifiers:** Simple but violates CAT-FR-AM-02 — content hashes are not IRIs in the W3C sense, and they couple identity to content (any content change produces a new identifier).
+2. **UUID URNs for all assets:** Assign a UUID URN (`urn:uuid:...`) per RFC 4122footnote:[https://www.rfc-editor.org/rfc/rfc4122[RFC 4122 — A Universally Unique IDentifier (UUID) URN Namespace]] to every asset regardless of type. Simple and uniform but discards the meaningful identifiers already present in RDF content (DIDs, ontology IRIs).
+3. **IRI extraction with UUID fallback:** Extract IRIs from RDF content where possible (`credentialSubject.id`, `@id`, ontology/shapes/vocabulary IRIs), generate UUID URNs for non-RDF assets and as fallback for RDF content without an extractable IRI.
+
+**Decision:** Option 3 — IRI extraction with UUID URN fallback.
+
+Two new components are introduced:
+
+* **`IriGenerator`** — extracts IRIs from RDF content (Verifiable Credentials via `credentialSubject.id`, generic JSON-LD via `@id`, OWL ontologies, SHACL shapes, SKOS concept schemes) or generates UUID URNs per RFC 4122 for non-RDF assets and as fallback.
+* **`IriValidator`** — validates IRI formats before storage. Supported formats: DIDs (`did:<method>:<id>`), UUID URNs (`urn:uuid:<uuid>`), generic URNs (`urn:<nid>:<nss>`), and HTTP/HTTPS IRIs.
+
+The public API is extended with IRI-based methods (`getById`, `getFileById`, `changeLifeCycleStatusById`, `deleteAssetById`) alongside the existing hash-based methods. API endpoints use `/assets/{id}` where `{id}` is the URL-encoded IRI.
+
+The `federated-catalogue.asset.subject-id-prefix` configuration property is removed — IRI generation is now handled entirely by `IriGenerator`.
+
+**Rationale:** Extracting meaningful IRIs from RDF content preserves semantic identity (a DID or ontology IRI carries provenance information that a UUID does not). UUID URNs for non-RDF assets satisfy RFC 4122 and CAT-FR-AM-02 while providing unique, stable identifiers without coupling identity to content. The content hash is retained internally for deduplication and file storage but is no longer the public identifier.
 

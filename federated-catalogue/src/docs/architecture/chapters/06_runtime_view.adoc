@@ -111,7 +111,7 @@ sequenceDiagram
     Keycloak -->> - ParticipantDao: group
     ParticipantDao ->> ParticipantDao: fromGroupRepo(group): participant
     ParticipantDao -->> - ParticipantsService: participant
-    ParticipantsService ->> + AssetStore: getByHash(part.assetHash)
+    ParticipantsService ->> + AssetStore: getById(part.assetId)
     AssetStore -->> - ParticipantsService: AssetMetadata
     ParticipantsService ->> ParticipantsService: [Set Assets to Participants]
     ParticipantsService -->> - ParticipantController: participant
@@ -276,10 +276,10 @@ Notes:
         Parti ->> + Keycloak: GET /realms/gaia-x/groups/{partID}
         Keycloak -->> - Parti: Participant
 
-        Parti ->> + AssetStore: getByHash(participantAssetHash)
+        Parti ->> + AssetStore: getById(participantAssetId)
         AssetStore -->> - Parti: ParticipantAsset
 
-        Parti ->> + AssetStore: deleteAsset(participantAssetHash)
+        Parti ->> + AssetStore: deleteAssetById(participantAssetId)
         AssetStore ->> + Graph: deleteClaims()
         Graph -->> - AssetStore:Null
         AssetStore -->> - Parti: Null
@@ -555,6 +555,8 @@ sequenceDiagram
 
 ==== Requesting a specific Asset
 
+Assets can be retrieved by their IRI. The IRI is URL-encoded in the path parameter.
+
 [mermaid, width=2000]
 ....
 sequenceDiagram
@@ -565,8 +567,8 @@ sequenceDiagram
     participant AssetStore as AssetStore
     User ->> + Auth:Authorize(ASSET_READ | ADMIN_ALL)
     Auth -->> - User:OK
-    User ->> + API:GET /assets/{asset_hash}
-    API ->> + AssetStore: getByHash(String asset_hash)
+    User ->> + API:GET /assets/{id}
+    API ->> + AssetStore: getById(String id)
     AssetStore -->> - API: AssetMetadata<br>+Asset
     API -->> - User:AssetMetadata, Asset
 ....
@@ -639,19 +641,22 @@ sequenceDiagram
     RdfDetector -->> - Service:false
     Service ->> Service:computeSHA256(bytes)
     Service ->> Service:buildMetadata(hash, contentType, fileSize, participantId)
+    Service ->> + IriGenerator:generateIri()
+    IriGenerator -->> - Service:urn:uuid:... (UUID URN)
     Service ->> + AssetStore:storeUnverified(metadata, filename)
-    AssetStore ->> AssetStore:generateSubjectId(prefix + hash)
     AssetStore ->> AssetStore:insertMetadata(PostgreSQL)
     AssetStore ->> + FileStore:storeFile(hash, contentAccessor)
     FileStore -->> - AssetStore:OK
     AssetStore -->> - Service:storedMetadata
     Service -->> - API:AssetMetadata
-    API -->> - User:201 Created (metadata with contentType, fileSize, id)
+    API -->> - User:201 Created (metadata with contentType, fileSize, iri)
 ....
 
 **Step 5-6:** `RdfDetector` checks the MIME type against the configured allowlist and, for `application/json`, inspects content for a JSON-LD `@context` pattern.
 
-**Step 9:** `storeUnverified` generates a content-addressable identifier (`urn:asset:sha256:<hash>`) if no subject ID is provided. If an asset with the same hash already exists, HTTP 409 (Conflict) is returned.
+**Step 7-8:** `IriGenerator` generates a UUID URN (`urn:uuid:...`) per RFC 4122 for the non-RDF asset. Each upload receives a unique IRI.
+
+**Step 9:** `storeUnverified` persists the metadata (including the assigned IRI) in PostgreSQL. If an asset with the same content hash already exists, HTTP 409 (Conflict) is returned with the existing IRI in the error response.
 
 **Step 11:** The raw bytes are written to the `assetFileStore`, not the schema/context File Store.
 
@@ -672,18 +677,18 @@ sequenceDiagram
     participant API
     participant Auth
     participant AssetStore as AssetStore
-    User ->> + API:POST /assets/{asset_hash}/revoke
+    User ->> + API:POST /assets/{id}/revoke
     API ->> + Auth:Authorize(ASSET_UPDATE | ADMIN_ALL)
     Auth -->> - API:[OK]
-    API ->> + AssetStore: getByHash(asset_hash)
+    API ->> + AssetStore: getById(id)
     AssetStore -->> - API: AssetMetadata
     API --> API:Check[credential-participant == user-participant | Ro-MU-CA]
     alt credential.type != Participant
         API -->> User: [Error. Use Participant API]
         Note right of User: The handling of participant credentials is still open. See #6
     else credential.type == Offering
-        API ->> + AssetStore: changeLifeCycleStatus(asset_hash, REVOKED)
-        AssetStore -->> AssetStore: getCredentialSubjectForHash()
+        API ->> + AssetStore: changeLifeCycleStatusById(id, REVOKED)
+        AssetStore -->> AssetStore: resolveHash(id)
         AssetStore -->> GraphDB: deleteClaims(credentialSubject)
         AssetStore -->> - API: [Ok, if no exception]
         API -->> - User:[Asset Meta]
@@ -994,7 +999,7 @@ sequenceDiagram
 
 ==== Store Non-RDF Assets to the Asset Store
 
-This sequence diagram shows the flow when storing a non-RDF asset. Unlike credentials, non-RDF assets skip graph database interaction entirely. The content is stored in the asset File Store and metadata (including content type, file size, and original filename) is stored in the Metadata Store.
+This sequence diagram shows the flow when storing a non-RDF asset. Unlike credentials, non-RDF assets skip graph database interaction entirely. The content is stored in the asset File Store and metadata (including content type, file size, original filename, and IRI) is stored in the Metadata Store. The IRI (a UUID URN) is assigned by `IriGenerator` before the store is called.
 
 [mermaid, width=2000]
 ....
@@ -1005,8 +1010,7 @@ sequenceDiagram
     participant MetaData as MetaData Store
     participant FileStore as Asset File Store
     Service ->> + AssetStore: storeUnverified(metadata, filename)
-    AssetStore ->> AssetStore: generateSubjectId(prefix + hash)
-    AssetStore ->> + MetaData: insertMetadata(hash, subjectId,<br>contentType, fileSize, filename)
+    AssetStore ->> + MetaData: insertMetadata(hash, iri,<br>contentType, fileSize, filename)
     MetaData -->> - AssetStore: OK
     AssetStore ->> + FileStore: storeFile(hash, contentAccessor)
     FileStore -->> - AssetStore: OK

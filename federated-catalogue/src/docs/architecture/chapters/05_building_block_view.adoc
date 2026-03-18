@@ -503,210 +503,75 @@ The Asset Store is responsible for storing credential files (whole files, not in
 
 For **credentials (RDF)**, the store first saves the metadata in the Metadata Store, then adds claims to the Graph database, and finally stores the file in the File Store. A transaction ensures that the stored data is consistent.
 
-For **non-RDF assets**, the store skips verification and graph interaction entirely. It stores metadata in the Metadata Store (with `content_type`, `file_size`, and `original_filename`), writes the raw bytes to the asset File Store, and auto-generates a content-addressable identifier (`urn:asset:sha256:<hash>`).
+For **non-RDF assets**, the store skips verification and graph interaction entirely. It stores metadata in the Metadata Store (with `content_type`, `file_size`, and `original_filename`), writes the raw bytes to the asset File Store, and assigns an IRI via the `IriGenerator` (typically a UUID URN per RFC 4122, e.g., `urn:uuid:...`).
 
-[source,java]
-----
-/**
- * A store for storing and retrieving asset meta data objects.
- *
- * @author hylke
- * @author j_reuter
- */
-public interface AssetStore {
-  /**
-   * Fetch an asset file by its hash value.
-   *
-   * @param hash The hash value that identifies the asset.
-   * @return The asset file.
-   */
-  ContentAccessor getFileByHash(String hash);
+[mermaid]
+....
+classDiagram
+    class AssetStore {
+        <<interface>>
+        +getFileByHash(hash: String) ContentAccessor
+        +getFileById(id: String) ContentAccessor
+        +getByHash(hash: String) AssetMetadata
+        +getById(id: String) AssetMetadata
+        +getByFilter(filter: AssetFilter, withMeta: boolean, withContent: boolean) PaginatedResults~AssetMetadata~
+        +storeCredential(credential: AssetMetadata, results: CredentialVerificationResult) void
+        +changeLifeCycleStatus(hash: String, targetStatus: AssetStatus) void
+        +changeLifeCycleStatusById(id: String, targetStatus: AssetStatus) void
+        +deleteAsset(hash: String) void
+        +deleteAssetById(id: String) void
+        +storeUnverified(metadata: AssetMetadata, filename: String) AssetMetadata
+        +invalidateExpiredAssets() int
+        +getActiveAssetHashes(afterHash: String, count: int, chunks: int, chunkId: int) List~String~
+        +clear() void
+    }
 
-  /**
-   * Fetch an asset and its meta data by its hash value.
-   *
-   * @param hash The hash value that identifies the asset meta data.
-   * @return The asset meta data object with the specified hash value.
-   */
-  AssetMetadata getByHash(String hash);
+    class IriGenerator {
+        +generateIri(content: byte[], contentType: String) String
+        +extractIriFromRdf(content: String) String
+        +generateUuidUrn() String
+        +generateDid() String
+    }
 
-  /**
-   * Fetch all assets that match the filter parameters.
-   *
-   * @param filter The filter to match all assets against.
-   * @param withMeta flag indicating the full metaData should be loaded instead of just the hash.
-   * @param withContent flag indicating the content should also be returned.
-   * @return List of all asset meta-data objects that match the specified filter.
-   */
-  PaginatedResults<AssetMetadata> getByFilter(AssetFilter filter, boolean withMeta, boolean withContent);
+    class IriValidator {
+        +isValid(iri: String) boolean
+        +validate(iri: String) void
+    }
 
-  /**
-   * Store the given credential (Verifiable Presentation or standalone Verifiable Credential).
-   *
-   * @param credential            The credential metadata to store.
-   * @param verificationResults   The results of the verification of the credential.
-   */
-  void storeCredential(AssetMetadata credential, CredentialVerificationResult verificationResults);
+    class AssetFilter {
+        -uploadTimeStart: Instant
+        -uploadTimeEnd: Instant
+        -statusTimeStart: Instant
+        -statusTimeEnd: Instant
+        -issuers: List~String~
+        -validators: List~String~
+        -statuses: List~AssetStatus~
+        -ids: List~String~
+        -hashes: List~String~
+        -offset: int
+        -limit: int
+        +setUploadTimeRange(start: Instant, end: Instant) void
+        +setStatusTimeRange(start: Instant, end: Instant) void
+    }
 
-  /**
-   * Change the life cycle status of the asset with the given hash.
-   *
-   * @param hash         The hash of the asset to work on.
-   * @param targetStatus The new status.
-   */
-  void changeLifeCycleStatus(String hash, AssetStatus targetStatus);
+    AssetStore ..> AssetFilter : uses
+    AssetStore ..> IriGenerator : uses
+    AssetStore ..> IriValidator : uses
+....
 
-  /**
-   * Remove the asset with the given hash from the store.
-   *
-   * @param hash The hash of the asset to work on.
-   */
-  void deleteAsset(String hash);
+The `AssetStore` provides two parallel access paths: **hash-based** methods (internal, used for content deduplication and file storage) and **IRI-based** methods (public API, introduced by CAT-FR-AM-02). Key IRI-based operations:
 
-  /**
-   * Store a non-RDF asset. Bypasses verification and graph storage.
-   * Writes metadata to the Metadata Store and content to the asset File Store.
-   *
-   * @param assetMetadata The asset metadata (hash, content type, file size, content accessor).
-   * @param originalFilename The original filename from the upload (may be null).
-   * @return The stored metadata with auto-generated subject ID.
-   * @throws ConflictException if an asset with the same hash already exists.
-   */
-  AssetMetadata storeUnverified(AssetMetadata assetMetadata, String originalFilename);
+[cols="2,3", options="header"]
+|===
+| Method | Description
+| `getById(id)` | Fetch an active asset and its metadata by its IRI
+| `getFileById(id)` | Fetch the asset file content by its IRI
+| `changeLifeCycleStatusById(id, status)` | Revoke or deprecate an asset by its IRI
+| `deleteAssetById(id)` | Remove an asset by its IRI
+| `storeUnverified(metadata, filename)` | Store a non-RDF asset; IRI is pre-assigned by `IriGenerator`
+|===
 
-  /**
-   * Invalidate expired assets in the store.
-   *
-   * @return Number of expired assets found.
-   */
-  int invalidateExpiredAssets();
-
-  /**
-   * Get "count" hashes of active assets, ordered by asset_hash, after
-   * the given hash. Chunking is done using:
-   * <pre>hashtext(asset_hash) % chunks = chunkId</pre>
-   *
-   * @param afterHash The last hash of the previous batch.
-   * @param count the number of hashes to retrieve.
-   * @param chunks the number of chunks to subdivide hashes into.
-   * @param chunkId the 0-based id of the chunk to get.
-   * @return the list of hashes coming after the hash "afterHash", ordered by
-   * hash.
-   */
-  List<String> getActiveAssetHashes(String afterHash, int count, int chunks, int chunkId);
-
-  /**
-   * Remove all assets from the AssetStore.
-   */
-  void clear();
-
-}
-
-
-/**
- * Filter parameters for searching asset meta data. If multiple items
- * are present, they are combined with an 'AND' semantic.
- */
-public class AssetFilter {
-
-  /**
-   * Start time for the time range filter when the asset was uploaded
-   * to the catalogue.
-   */
-  private Instant uploadTimeStart;
-
-  /**
-   * End time for the time range filter when the asset was uploaded to
-   * the catalogue.
-   */
-  private Instant uploadTimeEnd;
-
-  /**
-   * Start time for the time range filter when the status of the asset
-   * was last changed in the catalogue.
-   */
-  private Instant statusTimeStart;
-
-  /**
-   * End time for the time range filter when the status of the asset
-   * was last changed in the catalogue.
-   */
-  private Instant statusTimeEnd;
-
-  /**
-   * Filter for the issuer of the asset. This is the unique ID
-   * (credentialSubject) of the Participant that has prepared the
-   * asset.
-   */
-  private List<String> issuers;
-
-  /**
-   * Filter for a validator of the asset. This is the unique ID
-   * (credentialSubject) of the Participant that validated (part of) the
-   * asset.
-   */
-  private List<String> validators;
-
-  /**
-   * Filter for the status of the asset.
-   */
-  private List<AssetStatus> statuses;
-
-  /**
-   * Filter for a id/credentialSubject of the asset.
-   */
-  private List<String> ids;
-
-  /**
-   * Filter for a hash of the asset.
-   */
-  private List<String> hashes;
-
-  /**
-   * The offset to start returning results when applying this filter.
-   */
-  private int offset;
-
-  /**
-   * Maximum number of results to return when applying this filter. When set to 0,
-   * no limit applies.
-   */
-  private int limit;
-
-  /**
-   * Sets the upload time range that the filter will check for an asset
-   * record to match. The upload time specifies when the asset was
-   * uploaded to the catalogue. Start time and end time must be either both
-   * {@code null} or both non-{@code null}. Note: For not imposing any upper limit
-   * in time, {@code Instant.MAX} is <em>not</em> usable, since Hibernate will not
-   * accept this value and throw an exception.
-   *
-   * @param uploadTimeStart Start time of the time range that this filter will
-   *                        check for an asset record to match.
-   * @param uploadTimeEnd   End time of the time range that this filter will check
-   *                        for an asset record to match.
-   * @throws IllegalArgumentException If either start time or end time is
-   *                                  {@code null}, while the other is
-   *                                  non-{@code null}.
-   */
-  public void setUploadTimeRange(final Instant uploadTimeStart, final Instant uploadTimeEnd);
-
-  /**
-   * Sets the status time range that the filter will check for an asset
-   * record to match. The status time specifies when the asset was last
-   * changed in the catalogue. Start time and end time must be either both
-   * {@code null} or both non-{@code null}. Note: For not imposing any upper limit
-   * in time, {@code Instant.MAX} is <em>not</em> usable, since Hibernate will not
-   * accept this value and throw an exception.
-   *
-   * @param statusTimeStart Start time of the time range that this filter will
-   *                        check for an asset record to match.
-   * @param statusTimeEnd   End time of the time range that this filter will check
-   *                        for an asset record to match.
-   */
-  public void setStatusTimeRange(final Instant statusTimeStart, final Instant statusTimeEnd);
-}
-----
+The `IriGenerator` assigns IRIs before storage: it extracts IRIs from RDF content (`credentialSubject.id`, `@id`, ontology/shapes/vocabulary IRIs) or generates UUID URNs (RFC 4122) for non-RDF assets and as fallback. The `IriValidator` validates all assigned IRIs against supported formats (DIDs, UUID URNs, generic URNs, HTTP/HTTPS IRIs) and rejects invalid values before storage.
 
 The asset metadata is stored in the metadata store, using the following data model:
 
@@ -729,7 +594,12 @@ The asset metadata is stored in the metadata store, using the following data mod
 | VARCHAR | original_filename | | client-provided filename
 |===
 
-NOTE: The `content` column is nullable. For credentials (RDF), it stores the JSON-LD in the database. For non-RDF assets, content is stored only in the File Store and the database column remains `NULL`. The three asset metadata columns (`content_type`, `file_size`, `original_filename`) are backfilled with `content_type = 'application/ld+json'` for existing records. The table was renamed from `sdfiles` to `assets` and the primary key from `sdhash` to `asset_hash` (see Liquibase changeset `2026-03-09-rename-sdfiles-to-assets`).
+.Asset table notes
+****
+. The table was renamed from `sdfiles` to `assets` and the primary key from `sdhash` to `asset_hash` (see Liquibase changeset `2026-03-09-rename-sdfiles-to-assets`).
+. The `content` column is nullable. For credentials (RDF), it stores the JSON-LD in the database. For non-RDF assets, content is stored only in the File Store and the database column remains `NULL`. The three asset metadata columns (`content_type`, `file_size`, `original_filename`) are backfilled with `content_type = 'application/ld+json'` for existing records.
+. The `subjectid` column stores the asset's IRI (see ADR 7) — for RDF assets this is the extracted `credentialSubject.id` or equivalent; for non-RDF assets this is a UUID URN generated by `IriGenerator`.
+****
 
 ==== Schema Management Store
 
@@ -1080,7 +950,7 @@ The `RdfDetector` component classifies uploaded content as RDF or non-RDF using 
 
 ===== Asset Upload Service
 
-The `AssetUploadService` orchestrates the dual-path upload flow:
+The `AssetUploadService` orchestrates the dual-path upload flow. IRI assignment is performed by the `IriGenerator` before storage (see <<_iri_assignment>>).
 
 [mermaid, width=2000]
 ....
@@ -1088,8 +958,10 @@ flowchart TD
     Upload[POST /assets] --> Extract[Extract bytes + content type]
     Extract --> Detect{RdfDetector:\nis RDF?}
     Detect -->|Yes| Verify[Verification Pipeline]
-    Verify --> StoreCred[storeCredential\nmetadata + claims + graph]
-    Detect -->|No| StoreAsset[storeUnverified\nmetadata + FileStore only]
+    Verify --> IriRdf[IriGenerator:\nextract IRI from content]
+    IriRdf --> StoreCred[storeCredential\nmetadata + claims + graph]
+    Detect -->|No| IriNon[IriGenerator:\ngenerate UUID URN]
+    IriNon --> StoreAsset[storeUnverified\nmetadata + FileStore only]
     StoreCred --> Response[201 Created]
     StoreAsset --> Response
 ....
@@ -1098,8 +970,34 @@ For non-RDF assets:
 
 * No verification, no graph interaction
 * Content stored in `assetFileStore` (raw bytes)
-* Auto-generated ID: `urn:asset:sha256:<content-hash>`
-* Duplicate content rejected with HTTP 409 (Conflict)
+* IRI assigned by `IriGenerator`: UUID URN (`urn:uuid:...`) per RFC 4122
+* Duplicate content rejected with HTTP 409 (Conflict), with existing IRI in the error response
+
+[[_iri_assignment]]
+===== IRI Assignment
+
+The `IriGenerator` component assigns an IRI to each asset before storage (CAT-FR-AM-02). The strategy depends on asset type:
+
+[options="header",cols="1,2,2"]
+|===
+| Asset Type | IRI Source | Example
+| Non-RDF asset | Generated UUID URN (RFC 4122) | `urn:uuid:550e8400-e29b-41d4-a716-446655440000`
+| Verifiable Credential | Extracted from `credentialSubject.id` | `did:web:example.com`
+| Generic JSON-LD | Extracted from `@id` | `https://example.org/resource/123`
+| OWL ontology | Extracted ontology IRI | `https://example.org/ontology/v1`
+| SHACL shapes | Extracted shapes graph IRI | `https://example.org/shapes/v1`
+| SKOS concept scheme | Extracted concept scheme IRI | `https://example.org/vocab/v1`
+| RDF (no extractable IRI) | Generated UUID URN (fallback) | `urn:uuid:...`
+|===
+
+The `IriValidator` component validates all assigned IRIs. Supported formats:
+
+* **DIDs:** `did:<method>:<id>` (e.g., `did:web:example.com`, `did:key:z6Mk...`)
+* **UUID URNs:** `urn:uuid:<uuid>` (case-insensitive hex, per RFC 4122)
+* **Generic URNs:** `urn:<nid>:<nss>`
+* **HTTP/HTTPS IRIs:** standard URL format
+
+Invalid IRIs (null, blank, or syntactically malformed) are rejected before storage.
 
 ===== Asset Upload Configuration
 
@@ -1107,7 +1005,6 @@ For non-RDF assets:
 |===
 | Property | Default | Description
 | `federated-catalogue.rdf.content-types` | `[application/ld+json]` | MIME types treated as RDF (triggers verification pipeline)
-| `federated-catalogue.asset.subject-id-prefix` | `urn:asset:sha256:` | Prefix for auto-generated non-RDF asset identifiers
 | `federated-catalogue.file-store.asset.location` | _(required in production)_ | File system directory for non-RDF asset content
 |===
 
