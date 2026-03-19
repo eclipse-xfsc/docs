@@ -279,7 +279,8 @@ Notes:
         Parti ->> + AssetStore: getById(participantAssetId)
         AssetStore -->> - Parti: ParticipantAsset
 
-        Parti ->> + AssetStore: deleteAssetById(participantAssetId)
+        Parti ->> Parti: assetHash = ParticipantAsset.getHash()
+        Parti ->> + AssetStore: deleteAsset(assetHash)
         AssetStore ->> + Graph: deleteClaims()
         Graph -->> - AssetStore:Null
         AssetStore -->> - Parti: Null
@@ -677,18 +678,17 @@ sequenceDiagram
     participant API
     participant Auth
     participant AssetStore as AssetStore
-    User ->> + API:POST /assets/{id}/revoke
+    User ->> + API:POST /assets/{asset_hash}/revoke
     API ->> + Auth:Authorize(ASSET_UPDATE | ADMIN_ALL)
     Auth -->> - API:[OK]
-    API ->> + AssetStore: getById(id)
+    API ->> + AssetStore: getByHash(assetHash)
     AssetStore -->> - API: AssetMetadata
     API --> API:Check[credential-participant == user-participant | Ro-MU-CA]
     alt credential.type != Participant
         API -->> User: [Error. Use Participant API]
         Note right of User: The handling of participant credentials is still open. See #6
     else credential.type == Offering
-        API ->> + AssetStore: changeLifeCycleStatusById(id, REVOKED)
-        AssetStore -->> AssetStore: resolveHash(id)
+        API ->> + AssetStore: changeLifeCycleStatus(assetHash, REVOKED)
         AssetStore -->> GraphDB: deleteClaims(credentialSubject)
         AssetStore -->> - API: [Ok, if no exception]
         API -->> - User:[Asset Meta]

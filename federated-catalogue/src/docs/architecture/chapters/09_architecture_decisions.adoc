@@ -94,7 +94,7 @@ Backward compatibility is maintained by converting the legacy roles (Ro-MU-CA, R
 
 === ADR 6: Claim Class Naming Convention
 
-**Context:** CAT-NFR-01footnote:[Enhancement of the XFSC Federated Catalogue. 2025. https://github.com/eclipse-xfsc/docs/blob/9a178c30f76610e5924fd72c39d259d6a8ae0461/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf] renamed the legacy `SdClaim` class (tied to Self-Description terminology). The team needed to decide on the new name. Three options were considered:
+**Context:** CAT-NFR-01footnote:cat-enhancement[Enhancement of the XFSC Federated Catalogue. 2025. https://github.com/eclipse-xfsc/docs/blob/9a178c30f76610e5924fd72c39d259d6a8ae0461/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf] renamed the legacy `SdClaim` class (tied to Self-Description terminology). The team needed to decide on the new name. Three options were considered:
 
 1. **`Claim`** — generic, forward-looking, but too broad for the current implementation which only extracts claims from credentials.
 2. **`AssetClaim`** — aligns with the generic asset terminology but is misleading because non-RDF assets cannot have claims.
@@ -145,7 +145,7 @@ Key concepts:
 
 === ADR 7: IRI-Based Asset Identification
 
-**Context:** CAT-FR-AM-02: Each Asset MUST be identified by an IRI. DIDs and UUIDs as URNs (RFC 4122) MUST be supported.footnote:[Enhancement of the XFSC Federated Catalogue. 2025. https://github.com/eclipse-xfsc/docs/blob/9a178c30f76610e5924fd72c39d259d6a8ae0461/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf] The previous implementation used content-hash-based identifiers (`urn:asset:sha256:<hash>`) for non-RDF assets and `credentialSubject` for RDF credentials. Three approaches were considered:
+**Context:** CAT-FR-AM-02: Each Asset MUST be identified by an IRI. DIDs and UUIDs as URNs (RFC 4122) MUST be supported.footnote:cat-enhancement[] The previous implementation used content-hash-based identifiers (`urn:asset:sha256:<hash>`) for non-RDF assets and `credentialSubject` for RDF credentials. Three approaches were considered:
 
 1. **Keep hash-based identifiers:** Simple but violates CAT-FR-AM-02 — content hashes are not IRIs in the W3C sense, and they couple identity to content (any content change produces a new identifier).
 2. **UUID URNs for all assets:** Assign a UUID URN (`urn:uuid:...`) per RFC 4122footnote:[https://www.rfc-editor.org/rfc/rfc4122[RFC 4122 — A Universally Unique IDentifier (UUID) URN Namespace]] to every asset regardless of type. Simple and uniform but discards the meaningful identifiers already present in RDF content (DIDs, ontology IRIs).
@@ -158,9 +158,26 @@ Two new components are introduced:
 * **`IriGenerator`** — extracts IRIs from RDF content (Verifiable Credentials via `credentialSubject.id`, generic JSON-LD via `@id`, OWL ontologies, SHACL shapes, SKOS concept schemes) or generates UUID URNs per RFC 4122 for non-RDF assets and as fallback.
 * **`IriValidator`** — validates IRI formats before storage. Supported formats: DIDs (`did:<method>:<id>`), UUID URNs (`urn:uuid:<uuid>`), generic URNs (`urn:<nid>:<nss>`), and HTTP/HTTPS IRIs.
 
-The public API is extended with IRI-based methods (`getById`, `getFileById`, `changeLifeCycleStatusById`, `deleteAssetById`) alongside the existing hash-based methods. API endpoints use `/assets/{id}` where `{id}` is the URL-encoded IRI.
+The public API is extended with IRI-based methods (`getById`, `getFileById`) alongside the existing hash-based methods. Read endpoints use `/assets/{id}` where `{id}` is the URL-encoded IRI. Mutation operations (delete, revoke) remain hash-based — see the Hash-Based Mutation Operations Exception below.
 
 The `federated-catalogue.asset.subject-id-prefix` configuration property is removed — IRI generation is now handled entirely by `IriGenerator`.
 
 **Rationale:** Extracting meaningful IRIs from RDF content preserves semantic identity (a DID or ontology IRI carries provenance information that a UUID does not). UUID URNs for non-RDF assets satisfy RFC 4122 and CAT-FR-AM-02 while providing unique, stable identifiers without coupling identity to content. The content hash is retained internally for deduplication and file storage but is no longer the public identifier.
+
+==== Hash-Based Mutation Operations Exception
+
+The delete and revoke operations are the deliberate exceptions to IRI-based identification — both retain hash-based targeting:
+
+* `DELETE /assets/{asset_hash}` — permanently removes an asset
+* `POST /assets/{asset_hash}/revoke` — changes lifecycle status to REVOKED
+
+The same rationale applies to both operations:
+
+1. **Data model constraint** The `subjectid` column (the IRI) is not globally unique. The partial unique index `idx_asset_active` enforces uniqueness only among rows with `status=0` (ACTIVE). Multiple rows can share the same `subjectid` when they have different statuses (DEPRECATED, REVOKED, EOL). Mutation via `WHERE subjectid = :id` could match multiple rows — this is unacceptable for destructive or state-changing operations.
+
+2. **Mutation semantics** Delete and revoke are irreversible operations that demand unambiguous single-row targeting. The `asset_hash` column is the PRIMARY KEY — it guarantees exactly one row is affected. The IRI identifies a _logical asset_; the hash identifies a _specific content artifact_. Mutations operate at the physical artifact level, not the logical level. For revoke specifically, hash-based lookup finds the asset regardless of its current status, enabling the business logic to return a proper 409 Conflict (e.g., attempting to revoke an already deprecated asset) rather than a misleading 404.
+
+3. **Versioning readiness (CAT-FR-LM-01)footnote:cat-enhancement[]** The planned version control feature will introduce multiple version rows per `subjectid`, each with a different `asset_hash` and status. IRI-based mutation would become increasingly ambiguous — which version should be affected? Hash-based targeting remains precise regardless of how many versions exist. When versioning is introduced, both endpoints will be replaced by version-specific operations (`POST /assets/{id}/versions/{v}/revoke`).
+
+4. **Audit versioning forward-look** When audit history tracking is introduced (e.g., Hibernate Envers), physical deletion conflicts with audit trail immutability. At that point, the delete operation should transition to a lifecycle status change (e.g., → EOL) rather than physical row removal. Retaining hash-based targeting keeps the migration path clean: `DELETE WHERE hash` transitions to `UPDATE status WHERE hash`. The targeting mechanism (hash) stays consistent across this evolution.
 

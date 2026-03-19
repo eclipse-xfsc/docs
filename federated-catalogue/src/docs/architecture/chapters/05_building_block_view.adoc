@@ -517,9 +517,7 @@ classDiagram
         +getByFilter(filter: AssetFilter, withMeta: boolean, withContent: boolean) PaginatedResults~AssetMetadata~
         +storeCredential(credential: AssetMetadata, results: CredentialVerificationResult) void
         +changeLifeCycleStatus(hash: String, targetStatus: AssetStatus) void
-        +changeLifeCycleStatusById(id: String, targetStatus: AssetStatus) void
         +deleteAsset(hash: String) void
-        +deleteAssetById(id: String) void
         +storeUnverified(metadata: AssetMetadata, filename: String) AssetMetadata
         +invalidateExpiredAssets() int
         +getActiveAssetHashes(afterHash: String, count: int, chunks: int, chunkId: int) List~String~
@@ -566,10 +564,10 @@ The `AssetStore` provides two parallel access paths: **hash-based** methods (int
 | Method | Description
 | `getById(id)` | Fetch an active asset and its metadata by its IRI
 | `getFileById(id)` | Fetch the asset file content by its IRI
-| `changeLifeCycleStatusById(id, status)` | Revoke or deprecate an asset by its IRI
-| `deleteAssetById(id)` | Remove an asset by its IRI
 | `storeUnverified(metadata, filename)` | Store a non-RDF asset; IRI is pre-assigned by `IriGenerator`
 |===
+
+The `deleteAsset(hash)` and `changeLifeCycleStatus(hash, status)` methods are the deliberate exceptions — both remain hash-based to guarantee unambiguous single-row targeting. See ADR 7, Hash-Based Mutation Operations Exception.
 
 The `IriGenerator` assigns IRIs before storage: it extracts IRIs from RDF content (`credentialSubject.id`, `@id`, ontology/shapes/vocabulary IRIs) or generates UUID URNs (RFC 4122) for non-RDF assets and as fallback. The `IriValidator` validates all assigned IRIs against supported formats (DIDs, UUID URNs, generic URNs, HTTP/HTTPS IRIs) and rejects invalid values before storage.
 
