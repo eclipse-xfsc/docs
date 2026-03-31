@@ -736,6 +736,8 @@ sequenceDiagram
 
 ==== Get a Schema
 
+The optional `?version=X` query parameter retrieves a specific historical version. Without it, the current version is returned. A non-existent version number returns HTTP 404.
+
 [mermaid, width=2000]
 ....
 sequenceDiagram
@@ -745,13 +747,36 @@ sequenceDiagram
     participant SchemaStore as SchemaStore
     User ->> + Auth:Authorize(SCHEMA_READ | ADMIN_ALL)
     Auth -->> - User:OK
-    User ->> + API:GET /schemas/{schemaId}
-    API ->> + SchemaStore:getSchema(schemaId)
-    SchemaStore ->> SchemaStore:load Schema-file
-    SchemaStore -->> - API:Schema-file
+    User ->> + API:GET /schemas/{schemaId}[?version=X]
+    alt version parameter present
+        API ->> + SchemaStore:getSchemaVersion(schemaId, version)
+        SchemaStore -->> - API:Schema-file at version X (or 404)
+    else no version parameter
+        API ->> + SchemaStore:getSchema(schemaId)
+        SchemaStore -->> - API:Schema-file (current version)
+    end
     API -->> - User:Schema-file
 ....
 
+
+==== Get Schema Version History
+
+[mermaid, width=2000]
+....
+sequenceDiagram
+    actor User
+    participant Auth as Authentication
+    participant API
+    participant SchemaStore as SchemaStore
+    User ->> + Auth:Authorize(SCHEMA_READ | ADMIN_ALL)
+    Auth -->> - User:OK
+    User ->> + API:GET /schemas/{schemaId}/versions
+    API ->> + SchemaStore:getSchemaVersions(schemaId)
+    SchemaStore -->> - API:List<SchemaRecord> (ascending by version)
+    API ->> API:map to SchemaVersionList {schemaId, versions[]}
+    Note right of API: Each entry: version (1-based), createdAt, isCurrent
+    API -->> - User:SchemaVersionList
+....
 
 ==== Get the Schema that defines an Entity
 
