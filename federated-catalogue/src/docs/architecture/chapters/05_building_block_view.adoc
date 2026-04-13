@@ -711,8 +711,27 @@ public interface SchemaStore {
    * @return The union RDF graph.
    */
   ContentAccessor getCompositeSchema(SchemaType schemaType);
+
+  /**
+   * Get the content of a specific historical version of a schema.
+   *
+   * @param identifier The identifier of the schema.
+   * @param version The 1-based version number to retrieve.
+   * @return The schema content at the given version.
+   */
+  ContentAccessor getSchemaVersion(String identifier, int version);
+
+  /**
+   * Get the version history for the schema with the given identifier.
+   *
+   * @param identifier The identifier of the schema.
+   * @return Ordered list of schema records, one per version (ascending).
+   */
+  List<SchemaRecord> getSchemaVersions(String identifier);
 }
 ----
+
+Schema versioning is implemented via Hibernate Envers (see <<_audit_history>>). Every `PUT /schemas/{id}` call triggers a JPA `save()`, causing Envers to append a snapshot to `schemafiles_aud`. The `SchemaAuditRepository` component (DAO layer) encapsulates all Envers API calls (`AuditReaderFactory`, `AuditEntity` queries), keeping Envers types out of `SchemaJpaDao`. Versions exposed through the API are 1-based positional ordinals computed over per-schema revisions in ascending order.
 
 The schema metadata is stored in the metadata store, using the following data model:
 
@@ -723,8 +742,8 @@ erDiagram
         BIGINT id PK "sequence: schemafiles_id_seq"
         VARCHAR schemaid UK "unique business key"
         VARCHAR namehash
-        TIMESTAMP uploadtime
-        TIMESTAMP updatetime
+        TIMESTAMP created_at
+        TIMESTAMP modified_at
         VARCHAR type "ONTOLOGY | SHAPE | VOCABULARY"
         TEXT content
     }
@@ -842,6 +861,70 @@ erDiagram
         VARCHAR namehash
         TIMESTAMP uploadtime
         TIMESTAMP updatetime
+        VARCHAR type
+        TEXT content
+    }
+
+    SCHEMATERMS_AUD {
+        BIGINT id PK
+        INTEGER rev PK_FK
+        SMALLINT revtype
+        VARCHAR term
+        BIGINT schema_file_id
+    }
+
+    REVINFO ||--o{ ASSETS_AUD : tracks
+    REVINFO ||--o{ SCHEMAFILES_AUD : tracks
+    REVINFO ||--o{ SCHEMATERMS_AUD : tracks
+....
+
+.Audit table notes
+****
+. Each `_aud` table mirrors the columns of its source table plus `rev` (FK to REVINFO) and `revtype` (0=INSERT, 1=UPDATE, 2=DELETE). The composite primary key is `(id, rev)`.
+. Audit tables are managed by Liquibase (changeset `2026-03-25-envers-*`), not by Hibernate's `hbm2ddl` auto-generation.
+. Known limitation: bulk JPQL `DELETE` or `UPDATE` statements bypass Envers because they do not trigger JPA entity lifecycle events. All current DAO code uses entity-level operations, so this limitation does not apply in practice.
+****
+
+[[_audit_history]]
+==== Audit History (Hibernate Envers)
+
+The catalogue uses Hibernate Enversfootnote:[https://hibernate.org/orm/envers/[Hibernate Envers — Entity Auditing]] to maintain an audit trail for assets and schemas. Every insert, update, and delete on an audited entity is recorded in a corresponding `_aud` shadow table, linked to a global revision in the `REVINFO` table.
+
+Audited entities: `Asset` (`assets`), `SchemaFile` (`schemafiles`), `SchemaTerm` (`schematerms`).
+
+[mermaid, width=2000]
+....
+erDiagram
+    REVINFO {
+        INTEGER rev PK "sequence: revinfo_seq"
+        BIGINT revtstmp "epoch millis"
+    }
+
+    ASSETS_AUD {
+        BIGINT id PK
+        INTEGER rev PK_FK
+        SMALLINT revtype "0=INSERT 1=UPDATE 2=DELETE"
+        VARCHAR asset_hash
+        TEXT subjectid
+        TEXT issuer
+        TIMESTAMP uploadtime
+        TIMESTAMP statustime
+        TIMESTAMP expirationtime
+        SMALLINT status
+        TEXT content
+        VARCHAR content_type
+        BIGINT file_size
+        VARCHAR original_filename
+    }
+
+    SCHEMAFILES_AUD {
+        BIGINT id PK
+        INTEGER rev PK_FK
+        SMALLINT revtype
+        VARCHAR schemaid
+        VARCHAR namehash
+        TIMESTAMP created_at
+        TIMESTAMP modified_at
         VARCHAR type
         TEXT content
     }
