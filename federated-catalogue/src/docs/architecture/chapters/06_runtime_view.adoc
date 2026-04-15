@@ -1192,11 +1192,11 @@ Besides verifying the credential, additional tasks are executed (e.g., format de
 
 `VerificationServiceImpl` acts as a thin Context in the Strategy pattern: it resolves per-request verification toggles and delegates all verification and claim extraction logic to a `VerificationStrategy` (currently `CredentialVerificationStrategy`). The strategy contains the full format detection, VP/VC parsing, semantic validation, schema validation, signature verification, claim extraction, and protected namespace filtering logic. If any triples referencing the `fcmeta:` namespace are filtered, a user-visible warning is included in the `CredentialVerificationResult`. See <<_verification_strategy_pattern>> for details.
 
-**Format detection** is always active. The `FormatDetector` classifies the incoming credential into one of three paths: Path 1 (Tagus — JSON-LD with data-integrity proof), Path 2 (Loire — JWT per ICAM v24.07), or Path 3 (non-Gaia-X). For JWT credentials, the `JwtContentPreprocessor` unwraps the JWT envelope to produce JSON-LD for downstream processing. See <<_format_detection>>.
+**Format detection** is always active. The `FormatDetector` classifies the incoming credential as either Loire (JWT per ICAM v24.07) or generic VC 2.0. Credentials without a VC 2.0 context URI are rejected. For JWT credentials, the `JwtContentPreprocessor` unwraps the JWT envelope to produce JSON-LD for downstream processing. See <<_format_detection>>.
 
 **Syntactic validation** is always active. The credential is parsed as JSON-LD and validated against the Verifiable Credential data model. Any syntactic issue will raise an error here. For JWT credentials, parsing occurs after JWT unwrapping.
 
-**Semantic verification** validates the credential subject `@type` against the loaded ontologies. This is active by default and catches type mismatches early. The ontology bundle includes both Tagus-era (`gax-core:`) and Loire 2511 (`\https://w3id.org/gaia-x/2511#`) namespaces for backward compatibility (see ADR 9).
+**Semantic verification** validates the credential subject `@type` against the loaded ontologies. This is active by default and catches type mismatches early. The ontology bundle contains the Loire 2511 namespace (`\https://w3id.org/gaia-x/2511#`) — see ADR 9.
 
 **Schema validation** (when enabled) checks the uploaded credentials against a composite schema of type SHACL.
 If a credential does not conform to the composite schema, a verification exception is thrown with a message containing the validation report. In that case, the verification process does not proceed, and claims are not extracted.
@@ -1204,19 +1204,18 @@ Automatic schema validation against stored SHACL shapes has been **disabled in t
 
 NOTE: For backward compatibility, automatic schema validation during upload can be re-enabled via the configuration property `federated-catalogue.verification.schema=true`.
 
-**Cryptographic verification (trust verification)** (when enabled) has two paths depending on credential format:
+**Cryptographic verification (trust verification)** (when enabled) verifies JWT signatures. The `JwtSignatureVerifier` verifies the compact JWT signature by resolving the issuer's DID document, matching the `kid` to an `assertionMethod` verification method, and verifying the JWS with nimbus-jose-jwt. Key security constraints:
 
-* **JSON-LD with data-integrity proof (Path 1 — Tagus):** The JSON object is normalized using the Universal RDF Dataset Canonicalization Algorithm URDNA2015footnote:[https://w3c-ccg.github.io/rdf-dataset-canonicalization/spec/#dfn-urdna2015[RDF Dataset Canonicalization. A Standard RDF Dataset Canonicalization Algorithm. W3C, Final Community Group Report 15 October 2022]] as specified by Gaia-X. The LD proof signature is verified against the issuer's DID document.
+* `alg: none` is explicitly rejected before any key lookup
+* Embedded key headers (`jwk`, `x5c`, `x5u`) in the JWT are ignored — keys are sourced exclusively from the DID document
+* For VP JWTs, an `iss == holder` semantic guard is enforced
+* When `verifyVCSignatures=true`, inner VC JWTs from `EnvelopedVerifiableCredential` entries are extracted from their `data:` URLs and independently verified
 
-* **JWT (Path 2 — Loire):** The `JwtSignatureVerifier` verifies the compact JWT signature by resolving the issuer's DID document, matching the `kid` to an `assertionMethod` verification method, and verifying the JWS with nimbus-jose-jwt. Key security constraints:
-** `alg: none` is explicitly rejected before any key lookup
-** Embedded key headers (`jwk`, `x5c`, `x5u`) in the JWT are ignored — keys are sourced exclusively from the DID document
-** For VP JWTs, an `iss == holder` semantic guard is enforced
-** When `verifyVCSignatures=true`, inner VC JWTs from `EnvelopedVerifiableCredential` entries are extracted from their `data:` URLs and independently verified
+When the Gaia-X Trust Framework is additionally enabled, the key is validated against the Gaia-X Trust Anchor Registry to verify a valid trust anchor chain via the `x5u` certificate URL. Without the trust framework, signature verification only proves internal consistency (that a DID controls a key) but cannot establish identity or trust — this is why signature verification is disabled in the default profile (see ADR 3).
 
-When the Gaia-X Trust Framework is additionally enabled (either path), the key is validated against the Gaia-X Trust Anchor Registry to verify a valid trust anchor chain via the `x5u` certificate URL. Without the trust framework, signature verification only proves internal consistency (that a DID controls a key) but cannot establish identity or trust — this is why signature verification is disabled in the default profile (see ADR 3).
+NOTE: Linked Data proof verification (URDNA2015 normalization, `JsonWebSignature2020`, `Ed25519Signature2018`) is not supported. Credentials with LD proofs must be re-issued as JWT.
 
-Afterwards the claims are extracted from the credential. The claim extractor supports both VC 1.1 (`issuanceDate`/`expirationDate`) and VC 2.0 (`validFrom`/`validUntil`) date fields.
+Afterwards the claims are extracted from the credential using VC 2.0 date fields (`validFrom`/`validUntil`).
 Further, it is checked if all Credential Subjects in the credential affect the same subject.
 
 The flowchart below shows the steps within the verification sequence. Configuration-dependent steps are shown with dashed borders.
@@ -1224,8 +1223,8 @@ The flowchart below shows the steps within the verification sequence. Configurat
 [mermaid, width=2000]
 ....
 sequenceDiagram
-    VerificationService --> VerificationService:[Detect Format — Tagus / Loire / other]
-    VerificationService --> VerificationService:[Unwrap JWT if Loire]
+    VerificationService --> VerificationService:[Detect Format — Loire / VC 2.0 / reject]
+    VerificationService --> VerificationService:[Unwrap JWT if present]
     VerificationService --> VerificationService:[Verify Syntax]
     VerificationService --> VerificationService:[Verify Semantic]
     VerificationService ->> VerificationService:[Extract Credential Type]
@@ -1233,13 +1232,9 @@ sequenceDiagram
         VerificationService --> VerificationService:[Verify Schema]
     end
     opt signature verification enabled
-        alt JSON-LD with data-integrity proof (Tagus)
-            VerificationService --> VerificationService:[Verify LD proof signatures]
-        else JWT (Loire)
-            VerificationService --> VerificationService:[Verify JWT signature via DID document]
-            opt VP JWT + verifyVCSignatures
-                VerificationService --> VerificationService:[Verify inner EnvelopedVC JWTs]
-            end
+        VerificationService --> VerificationService:[Verify JWT signature via DID document]
+        opt VP JWT + verifyVCSignatures
+            VerificationService --> VerificationService:[Verify inner EnvelopedVC JWTs]
         end
         opt Gaia-X Trust Framework enabled
             VerificationService --> VerificationService:[Validate trust anchor chain]
@@ -1253,7 +1248,7 @@ sequenceDiagram
 ....
 flowchart LR
     subgraph zero [Format Detection]
-        zeroA(Detect format:<br>Tagus / Loire / other)
+        zeroA(Detect format:<br>Loire / VC 2.0 / reject)
         zeroA --> zeroB{JWT?}
         zeroB --> |yes| zeroC(Unwrap JWT envelope)
         zeroB --> |no| zeroD([JSON-LD passthrough])
@@ -1277,14 +1272,12 @@ flowchart LR
         direction TB
         fourPre{{Signature verification<br>enabled?}}
         fourPre --> |no| fourSkip([Skip — no cryptographic check])
-        fourPre --> |yes| fourFmt{JWT or LD proof?}
-        fourFmt --> |LD proof| fourA(Verify LD proof signatures<br>via URDNA2015 normalization)
-        fourFmt --> |JWT| fourJWT(Verify JWT signature<br>via DID document + assertionMethod)
+        fourPre --> |yes| fourJWT(Verify JWT signature<br>via DID document + assertionMethod)
         fourJWT --> fourInner{VP JWT +<br>verifyVCSignatures?}
         fourInner --> |yes| fourEnv(Verify inner<br>EnvelopedVC JWTs)
         fourInner --> |no| fourC
         fourEnv --> fourC
-        fourA --> fourC(Check if public key valid)
+        fourC(Check if public key valid)
         fourC --> fourD{{Gaia-X Trust Framework <br> enabled?}}
         fourD --> |yes| fourE(Validate against <br> Gaia-X Trust Anchor Registry)
         fourD --> |no| fourF([Skip trust anchor validation])

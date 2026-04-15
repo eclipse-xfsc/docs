@@ -19,7 +19,7 @@ The Catalogue is not directly accessed by end usersfootnote:[Here, this term com
 
 Authentication within the Federation is realized by a dedicated component. It is not part of the Federated Catalogue. To demonstrate the integration, the Federated Catalogue offers an Authentication component, based on common, off the shelf software (see section <<_authentication>>).
 
-The Federated Catalogue offers the possibility to verify credentials (Verifiable Presentations / Verifiable Credentials). Two credential formats are supported: JSON-LD with data-integrity proofs (Gaia-X Tagus) and JWT-wrapped credentials per ICAM v24.07 (Gaia-X Loire). The verification pipeline consists of four independently configurable stages: syntactic parsing, semantic validation, schema validation (SHACL), and cryptographic signature verification. Each stage can be enabled or disabled via configuration properties. A `FormatDetector` classifies incoming credentials and routes them to the appropriate verification path (see ADR 8).
+The Federated Catalogue offers the possibility to verify credentials (Verifiable Presentations / Verifiable Credentials). Credentials must conform to the W3C VC 2.0 data model and use JWT envelopes per ICAM v24.07 (Gaia-X Loire) or the generic VC 2.0 format. Earlier Gaia-X trust framework generations (Elbe, Tagus) are no longer supported — the catalogue rejects VC 1.1 context URIs and Linked Data proofs with a `VerificationException` (see ADR 9). The verification pipeline consists of four independently configurable stages: syntactic parsing, semantic validation, schema validation (SHACL), and cryptographic signature verification. Each stage can be enabled or disabled via configuration properties. A `FormatDetector` classifies incoming credentials and routes them to the appropriate verification path (see ADR 8).
 
 The catalogue supports two deployment profiles (see <<_verification_profiles>>):
 
@@ -136,17 +136,17 @@ The catalogue implementation is structured into two main components _fc-service-
 | Authorization | Handling the authorization, and user management in combination with the _Service_ and _Authentication_ component.
 | Authentication | This component stores the users and participant metadata.
 | Verification
-a| Responsible for applying the defined verification rules on credentials (Verifiable Presentations or standalone Verifiable Credentials) and extracting claims. Supports both JSON-LD credentials with data-integrity proofs (Tagus format) and JWT-wrapped credentials per ICAM v24.07 (Loire format).
+a| Responsible for applying the defined verification rules on credentials (Verifiable Presentations or standalone Verifiable Credentials) and extracting claims. Accepts JWT-wrapped credentials per ICAM v24.07 (Gaia-X Loire) and generic VC 2.0 JSON-LD.
 
 * **Verification pipeline:** Syntactic, semantic, and cryptographic verification of credentials. The credential is checked as a whole — if VC verification fails, the entire verification fails.
 * **Strategy pattern:** `VerificationServiceImpl` acts as a thin Context that delegates to a `VerificationStrategy` implementation (currently `CredentialVerificationStrategy`).
-* **Format detection:** `FormatDetector` classifies incoming credentials into three verification paths: Path 1 (Tagus JSON-LD with data-integrity proofs), Path 2 (Loire JWT per ICAM v24.07), or Path 3 (non-Gaia-X). See <<_format_detection>>.
+* **Format detection:** `FormatDetector` classifies incoming credentials into two verification paths: Loire (JWT per ICAM v24.07) or generic VC 2.0. Credentials without a VC 2.0 context URI are rejected as `UNKNOWN`. See <<_format_detection>>.
 * **JWT content preprocessing:** `JwtContentPreprocessor` detects JWT-wrapped credentials using a two-signal approach (Content-Type header as primary signal, body prefix as fallback) and unwraps the JWT envelope to produce JSON-LD for downstream processing. See <<_jwt_content_preprocessing>>.
 * **JWT signature verification:** `JwtSignatureVerifier` verifies compact JWT signatures by resolving the issuer's DID document, matching `kid` to an `assertionMethod` verification method, and cryptographically verifying the JWS. Also verifies inner VC JWTs from `EnvelopedVerifiableCredential` entries in VP JWTs. See <<_jwt_signature_verification>>.
 * **Loire JWT parsing:** `LoireJwtParser` decodes Loire-format JWTs where the credential is the top-level JWT payload (no `vc`/`vp` claim wrapper), conforming to ICAM v24.07. See <<_loire_jwt_parsing>>.
 * **Schema Validation Service:** Automatic SHACL schema validation has been disabled in the upload flow and extracted to a dedicated service.
 * **Revalidation Service:** Periodically revalidates submitted credentials.
-* **Claim Extractor:** Extracts claims from Verifiable Presentations and standalone Verifiable Credentials. Supports both VC 1.1 (`issuanceDate`/`expirationDate`) and VC 2.0 (`validFrom`/`validUntil`) date fields.
+* **Claim Extractor:** Extracts claims from Verifiable Presentations and standalone Verifiable Credentials. Uses VC 2.0 date fields (`validFrom`/`validUntil`).
 | Graph Store | Interface and logic for communicating with the Graph DB.
 
 | Schema Store
@@ -440,14 +440,14 @@ Claims pass through the `ProtectedNamespaceFilter` before being returned (see <<
 [[_format_detection]]
 ===== Format Detection
 
-The `FormatDetector` classifies incoming credentials into one of three verification paths based on JWT header values (`typ`, `cty`) and payload structure:
+The `FormatDetector` classifies incoming credentials into one of the following verification paths based on JWT header values (`typ`, `cty`) and payload structure. All credentials must include the W3C VC 2.0 context URI (`\https://www.w3.org/ns/credentials/v2`). Credentials using the VC 1.1 context (`\https://www.w3.org/2018/credentials/v1`) or Linked Data proofs are rejected as `UNKNOWN`.
 
 [options="header",cols="1,2,3"]
 |===
-| Path | Format | Detection criteria
-| Path 1 (Tagus) | JSON-LD with data-integrity proof | No JWT envelope; JSON-LD body with `proof` field
-| Path 2 (Loire) | JWT per ICAM v24.07 / W3C VC-JOSE-COSE | JWT envelope with recognized `typ`/`cty` headers (see table below)
-| Path 3 (non-Gaia-X) | Other JSON-LD or JWT formats | Does not match Path 1 or Path 2 criteria
+| Format | Label | Detection criteria
+| Loire JWT (ICAM v24.07 / W3C VC-JOSE-COSE) | `GAIAX_V2_LOIRE` | JWT envelope with recognized `typ`/`cty` headers (see table below)
+| Generic VC 2.0 (JSON-LD or JWT with `vc`/`vp` wrapper) | `VC2_DANUBETECH` | VC 2.0 context present; does not match Loire header criteria
+| Unrecognized | `UNKNOWN` | No VC 2.0 context, or VC 1.1 context, or Linked Data proof → rejected
 |===
 
 The detector accepts two families of JWT header values (see ADR 8):
@@ -515,7 +515,7 @@ The verification sequence:
 
 For VP JWTs, `CredentialVerificationStrategy` additionally enforces the `iss == holder` semantic guard: the VP JWT `iss` claim must match the VP `holder` field.
 
-**Inner VC verification in VP JWTs:** When `verifyVCSignatures=true` and the VP JWT contains `EnvelopedVerifiableCredential` entries (ICAM v24.07 format), each inner VC JWT is extracted from its `data:application/vc+ld+json+jwt,{jwt}` URL and independently verified via `JwtSignatureVerifier`. Mixed VP content (some enveloped JWTs, some inline JSON-LD VCs with `proof` fields) is supported — each inner VC is verified by its respective path.
+**Inner VC verification in VP JWTs:** When `verifyVCSignatures=true` and the VP JWT contains `EnvelopedVerifiableCredential` entries (ICAM v24.07 format), each inner VC JWT is extracted from its `data:application/vc+ld+json+jwt,{jwt}` URL and independently verified via `JwtSignatureVerifier`.
 
 [NOTE]
 ====
@@ -548,7 +548,7 @@ Inner VCs in a Loire VP JWT use the `EnvelopedVerifiableCredential` format:
 }
 ----
 
-The JWT is extracted from the `data:` URL by stripping the media type prefix. The parser also supports VC 2.0 credentials that use the `https://www.w3.org/ns/credentials/v2` context URL and `validFrom`/`validUntil` date fields instead of the VC 1.1 `issuanceDate`/`expirationDate`.
+The JWT is extracted from the `data:` URL by stripping the media type prefix. The parser requires credentials to use the `https://www.w3.org/ns/credentials/v2` context URL and VC 2.0 date fields (`validFrom`/`validUntil`).
 
 ==== Graph Store
 
@@ -1148,23 +1148,20 @@ flowchart LR
 
 The strict profile enables **all verification stages**, matching the original 2.0.0 implementation behaviour. Signature verification is meaningful here because it is coupled with the Gaia-X Trust Framework, which validates the `x5u` certificate chain against the Trust Anchor Registry — binding the cryptographic identity to a vetted legal entity.
 
-Both credential formats are supported in the strict profile:
-
-* **Tagus (JSON-LD + data-integrity proof):** Signature verified via the existing LD proof path (`UniSignatureVerifier`).
-* **Loire (JWT per ICAM v24.07):** Signature verified via `JwtSignatureVerifier` using DID document key resolution (see <<_jwt_signature_verification>>). VP JWT inner VCs (`EnvelopedVerifiableCredential`) are also verified.
+JWT credentials are verified via `JwtSignatureVerifier` using DID document key resolution (see <<_jwt_signature_verification>>). VP JWT inner VCs (`EnvelopedVerifiableCredential`) are also verified.
 
 [options="header",cols="1,1"]
 |===
 | Stage | Status
 | Syntactic parsing | Always active
-| Format detection | Always active (classifies Tagus vs. Loire vs. non-Gaia-X)
+| Format detection | Always active (classifies Loire vs. VC 2.0)
 | Semantic validation | *Active*
 | Schema validation (SHACL) | *Active*
-| Signature verification (LD proof + JWT) | *Active*
+| JWT signature verification | *Active*
 | Trust framework (Gaia-X) | *Active*
 |===
 
-**Capabilities:** Full Gaia-X compliance enforcement. JSON-LD credentials must carry a valid data-integrity proof. JWT credentials must be signed with a key resolvable from the issuer's DID document. In both cases, the DID document must contain an `x5u` URL pointing to a valid certificate chain registered in the Trust Anchor Registry. Only `did:web` identifiers are accepted when the trust framework is enabled.
+**Capabilities:** Full Gaia-X compliance enforcement. JWT credentials must be signed with a key resolvable from the issuer's DID document. The DID document must contain an `x5u` URL pointing to a valid certificate chain registered in the Trust Anchor Registry. Only `did:web` identifiers are accepted when the trust framework is enabled.
 
 **Infrastructure required:** PostgreSQL, Neo4j (or Fuseki), Keycloak, NATS, DID resolver (local or Universal Resolver), certificate chain hosting, trust anchor registry.
 
@@ -1173,15 +1170,12 @@ Both credential formats are supported in the strict profile:
 flowchart LR
     subgraph strict ["Strict Profile"]
         direction LR
-        A(Parse + Check syntax) --> B(Detect format:\nTagus / Loire / other)
+        A(Parse + Check syntax) --> B(Detect format:\nLoire / VC 2.0)
         B --> C(Validate against\nJSON-LD Grammar)
         C --> D(Extract Credential Type)
         D --> E(Validate against\nSHACL shapes)
-        E --> F{JWT or LD proof?}
-        F --> |LD proof| G1(Verify LD proof\nsignatures)
-        F --> |JWT| G2(Verify JWT signature\nvia DID document)
-        G1 --> H(Resolve DID +\ncheck public key)
-        G2 --> H
+        E --> G(Verify JWT signature\nvia DID document)
+        G --> H(Resolve DID +\ncheck public key)
         H --> I(Validate x5u cert chain\nagainst Trust Anchor Registry)
         I --> J([Extract Claims])
         J --> K([Extract Participant])
@@ -1206,18 +1200,15 @@ flowchart TB
 
     subgraph pipeline ["Verification Pipeline"]
         direction TB
-        P[Parse + Check syntax] --> FMT[Detect format:\nTagus / Loire / other]
+        P[Parse + Check syntax] --> FMT[Detect format:\nLoire / VC 2.0]
         FMT --> SEM[Semantic validation\n— ontology type check]
         SEM --> SCH{Schema validation\nenabled?}
         SCH --> |yes| SHACL(Validate against\nSHACL composite schema)
         SCH --> |no| SIG
         SHACL --> SIG{Signature verification\nenabled?}
-        SIG --> |yes| SIGFMT{JWT or LD proof?}
+        SIG --> |yes| JWTVP(Verify JWT signature\nvia DID document)
         SIG --> |no| EXT
-        SIGFMT --> |LD proof| LDVP(Verify LD proof\nsignatures)
-        SIGFMT --> |JWT| JWTVP(Verify JWT signature\nvia DID document)
-        LDVP --> TF{Gaia-X Trust Framework\nenabled?}
-        JWTVP --> TF
+        JWTVP --> TF{Gaia-X Trust Framework\nenabled?}
         TF --> |yes| TA(Validate against\nTrust Anchor Registry)
         TF --> |no| EXT
         TA --> EXT([Extract Claims +\nExtract Participant])
@@ -1227,7 +1218,6 @@ flowchart TB
     style FMT fill:#e8f5e9,stroke:#4caf50
     style SEM fill:#e8f5e9,stroke:#4caf50
     style SHACL fill:#fff3e0,stroke:#ff9800
-    style LDVP fill:#fff3e0,stroke:#ff9800
     style JWTVP fill:#fff3e0,stroke:#ff9800
     style TA fill:#fff3e0,stroke:#ff9800
     style EXT fill:#e3f2fd,stroke:#42a5f5

@@ -39,43 +39,40 @@ This listing shows the full structure of a credential (Verifiable Presentation o
 [source,json]
 ----
 {
-  "@context": "https://www.w3.org/2018/credentials/v1"
+  "@context": ["https://www.w3.org/ns/credentials/v2", "https://w3id.org/gaia-x/2511#"],
   "type": "VerifiablePresentation",
-  "verifiableCredential": {
-    "@context": "https://www.w3.org/2018/credentials/v1",
-    "@type": "VerifiableCredential",
-    "issuer": "http://gaiax.de",
-    "issuanceDate": "2022-10-19T18:48:09Z",
+  "verifiableCredential": [{
+    "@context": ["https://www.w3.org/ns/credentials/v2", "https://w3id.org/gaia-x/2511#"],
+    "type": ["VerifiableCredential", "gx:LegalPerson"],
+    "issuer": "did:web:example.com",
+    "validFrom": "2026-01-30T00:00:00Z",
+    "validUntil": "2027-12-31T23:59:59Z",
     "credentialSubject": {
       "@context": {
-        "ex": "http://example.org/",
-        "gax-trust-framework": "https://w3id.org/gaia-x/gax-trust-framework#",
-        "xsd": "http://www.w3.org/2001/XMLSchema#",
+        "gx": "https://w3id.org/gaia-x/2511#",
         "vcard": "http://www.w3.org/2006/vcard/ns#"
       },
-      "@id": "ex:test-issuer",
-      "@type": "gax-trust-framework:LegalPerson",
-      "gax-trust-framework:registrationNumber": "DE182676944",
-      "gax-trust-framework:legalAddress": {
+      "@id": "did:web:test-issuer.example.com",
+      "@type": "gx:LegalPerson",
+      "gx:registrationNumber": "DE182676944",
+      "gx:legalAddress": {
         "@type": "vcard:Address",
         "vcard:country": "DE",
         "vcard:locality": "Köln",
         "vcard:postal-code": "50825",
         "vcard:street-address": "Lichtstraße 43h"
       },
-      "gax-trust-framework:headquarterAddress": {
+      "gx:headquarterAddress": {
         "@type": "vcard:Address",
         "vcard:country": "DE",
         "vcard:locality": "Köln",
         "vcard:postal-code": "50825",
         "vcard:street-address": "Lichtstraße 43h"
       },
-      "gax-trust-framework:legalName": "eco - Verband der Internetwirtschaft e.V.",
-      "gax-trust-framework:name": "eco - Verband der Internetwirtschaft"
-    },
-    "proof": { ... }
-  },
-  "proof": { ... }
+      "gx:legalName": "eco - Verband der Internetwirtschaft e.V.",
+      "gx:name": "eco - Verband der Internetwirtschaft"
+    }
+  }]
 }
 
 ... # two more with the same structure, just different attribute values
@@ -134,14 +131,14 @@ One Service Offering; see https://gitlab.com/gaia-x/data-infrastructure-federati
 ----
 {
   "@id": "http://w3id.org/gaia-x/indiv#serviceElasticSearch.json",
-  "@type": "gax-trust-framework:ServiceOffering",
+  "@type": "gx:ServiceOffering",
   "ex:some_property": {
     "ex:some_other_property": {
       "@value": "ex:some_service",
-      "@type": "gax-trust-framework:ServiceOffering"
+      "@type": "gx:ServiceOffering"
     }
   },
-  "gax-trust-framework:name": "Elastic Search DB"
+  "gx:name": "Elastic Search DB"
 }
 ----
 
@@ -170,16 +167,16 @@ A Participant like used in the query for <<anchor:_all_nodes_and_relationships,a
 ----
 {
   "@id": "ex:test-issuer2",
-  "@type": "gax-trust-framework:LegalPerson",
-  "gax-trust-framework:legalAddress": {
+  "@type": "gx:LegalPerson",
+  "gx:legalAddress": {
     "@type": "vcard:Address",
     "vcard:country": "DE",
     "vcard:locality": "Cologne",
     "vcard:postal-code": "11111",
     "vcard:street-address": "1 Test Street"
   },
-  "gax-trust-framework:legalName": "eco - Verband der Internetwirtschaft e.V.",
-  "gax-trust-framework:name": "eco 2"
+  "gx:legalName": "eco - Verband der Internetwirtschaft e.V.",
+  "gx:name": "eco 2"
 }
 ----
 
@@ -215,21 +212,21 @@ Two Service Offerings, which both match the query: https://gitlab.com/gaia-x/dat
 ----
 {
   "@id": "http://w3id.org/gaia-x/indiv#serviceElasticSearch.json",
-  "@type": "gax-trust-framework:ServiceOffering",
+  "@type": "gx:ServiceOffering",
   "ex:some_property": {
     "ex:some_other_property": {
       "@value": "ex:some_service",
-      "@type": "gax-trust-framework:ServiceOffering"
+      "@type": "gx:ServiceOffering"
     }
   },
-  "gax-trust-framework:name": "Elastic Search DB"
+  "gx:name": "Elastic Search DB"
 }
 
 ...
 
 {
   "@id": "ex:credentialSubject2",
-  "@type": "gax-trust-framework:ServiceOffering",
+  "@type": "gx:ServiceOffering",
   "ex:some_property": {
     "@value": "http://ex.com/resource23",
     "@type": "xsd:anyURI"
@@ -263,9 +260,9 @@ One Service Offering; see https://gitlab.com/gaia-x/data-infrastructure-federati
 ----
 {
   "@id": "http://w3id.org/gaia-x/indiv#serviceElasticSearch.json",
-  "@type": "gax-trust-framework:ServiceOffering",
+  "@type": "gx:ServiceOffering",
   ...
-  "gax-trust-framework:name": "Elastic Search DB"
+  "gx:name": "Elastic Search DB"
 }
 ----
 
