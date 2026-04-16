@@ -225,48 +225,43 @@ HTTP content types follow the same principle:
 * No cross-family validation is enforced: `typ` and `cty` are validated independently against their respective sets, not as pairs. A JWT with `typ: vc+jwt` and `cty: vc+ld+json` is accepted — this is intentionally permissive.
 * `cty` remains mandatory despite the W3C spec stating SHOULD (not MUST). The live GXDCH always sends it, and relaxing the requirement would widen the surface for malformed JWTs.
 
-=== ADR 9: Loire Ontology & Schema Namespace Coexistence
+=== ADR 9: Loire 2511 Ontology and Removal of Tagus Support
 
-**Context:** The Federated Catalogue bundles Gaia-X ontology files (OWL) and SHACL shapes for semantic type resolution and schema validation. The existing bundle uses the Tagus-era namespaces (`gax-core:`, `gax-trust-framework:`). Loire credentials use the `https://w3id.org/gaia-x/2511#` namespace with a different class hierarchy (e.g., `gx:LegalPerson` instead of `gax-trust-framework:LegalParticipant`).
+**Context:** The Gaia-X ecosystem has evolved through several trust framework generations. The earlier releases — Elbe and Tagus (ICAM 22.10) — used the W3C VC 1.1 data model with Linked Data proofs (`JsonWebSignature2020`) and the `gax-core:` / `gax-trust-framework:` namespaces. The current Loire release (ICAM 24.07) uses the W3C VC 2.0 data model with JWT signatures and the `\https://w3id.org/gaia-x/2511#` namespace.
 
-The class hierarchies are **disconnected graphs** — `gax-core:Participant` is not a subclass of `gx:2511#Participant`. A single set of type URIs cannot resolve both. Without the 2511 ontology, SPARQL-based type resolution fails for Loire credentials because the bundled ontology does not contain 2511 classes, and SHACL validation fails because the bundled shapes do not match Loire credential structure.
+The Federated Catalogue initially supported both generations in parallel (namespace coexistence via per-format type URI resolution). However, the Tagus-era class hierarchies are **disconnected graphs** from the 2511 hierarchy — maintaining both added configuration complexity (`legacy-type` properties) and code paths (`GAIAX_V1_TAGUS` enum, `Vc11Processor`, `UniSignatureVerifier`) with no active consumers.
 
-Three approaches were considered:
+**Decision:** Remove Tagus and Elbe support entirely. The catalogue exclusively supports the Loire 2511 namespace and VC 2.0.
 
-1. **Replace Tagus files with 2511:** Clean but breaks Path 1 (Tagus) backward compatibility — existing credentials would fail type resolution.
-2. **Bundle both alongside, single type URI config:** Both ontology files loaded, but only one set of type URIs configured. Fails because the hierarchies are disconnected — a single `participant.type` URI cannot match both `gax-core:Participant` and `gx:2511#Participant`.
-3. **Bundle both alongside, per-format type URI resolution:** Both ontology files loaded into the schema store. `CredentialVerificationStrategy` uses the `CredentialFormat` from `FormatDetector` to select which type URIs to pass to `ClaimValidator.getSubjectType()`. Config carries both URI sets (`type` for 2511, `legacy-type` for gax-core).
+[IMPORTANT]
+====
+**Migration impact:** This is not a graceful deprecation. The `FormatDetector` rejects any credential that uses the VC 1.1 context URI (`\https://www.w3.org/2018/credentials/v1`) or lacks a VC 2.0 context URI. Linked Data proofs are rejected with `"Linked Data proof verification is not supported. Use JWT or Enveloped Credential format."` Existing Tagus-era credentials cannot be uploaded to the catalogue — they must be re-issued in Loire/VC 2.0 format.
+====
 
-**Decision:** Option 3 — namespace coexistence with per-format type URI resolution.
+The ontology bundle contains only Loire 2511 files:
 
-The ontology bundle includes both Tagus-era and Loire 2511 files:
-
-[cols="1,2,2",options="header"]
+[cols="1,2",options="header"]
 |===
-| Type | Tagus (kept for Path 1) | Loire 2511 (new)
-| OWL ontology | `gax-core_generated.ttl`, `gax-trust-framework_generated.ttl`, `gx.ttl` | `gx-2511.ttl`
-| SHACL shapes | `mergedShapesGraph.ttl` | `gx-2511-shapes.ttl`
+| Type | File
+| OWL ontology | `gx-2511.ttl`
+| SHACL shapes | `gx-2511-shapes.ttl`
 |===
 
-Type URI configuration carries both sets:
+Type URI configuration uses a single namespace:
 
 [source,yaml]
 ----
 participant:
-  type: "https://w3id.org/gaia-x/2511#Participant"          # Loire (Path 2)
-  legacy-type: "https://w3id.org/gaia-x/core#Participant"    # Tagus (Path 1)
+  type: "https://w3id.org/gaia-x/2511#Participant"
 resource:
   type: "https://w3id.org/gaia-x/2511#Resource"
-  legacy-type: "https://w3id.org/gaia-x/core#Resource"
 service-offering:
   type: "https://w3id.org/gaia-x/2511#ServiceOffering"
-  legacy-type: "https://w3id.org/gaia-x/core#ServiceOffering"
 ----
 
 Format-aware resolution in `CredentialVerificationStrategy.resolveBaseClass()`:
 
 * `GAIAX_V2_LOIRE` → uses `type` (2511 URIs)
-* `GAIAX_V1_TAGUS` → uses `legacy-type` (gax-core URIs)
 * `VC2_DANUBETECH` → skips Gaia-X type resolution entirely (domain-specific ontologies)
 
 ==== Stripped Ontology: Why the Registry OWL Cannot Be Used Directly
@@ -326,10 +321,9 @@ If a future 2511 spec version introduces `owl:equivalentClass`, `owl:intersectio
 
 **Rationale:**
 
-* Bundling both ontology sets allows the composite schema graph to resolve types from both Tagus and Loire credentials — essential during the ecosystem migration period.
-* Per-format URI selection avoids the disconnected-graph problem without requiring artificial `rdfs:subClassOf` links between the two namespaces (which would be semantically incorrect).
-* SHACL coexistence is safe: closed shapes on the 2511 side do not interfere with Tagus credentials because shape targets use different class URIs.
-* 2511 OWL and SHACL files are bundled as classpath resources (fetched from the Gaia-X registry at development time), avoiding a runtime dependency on registry availability. The OWL file is stripped to class hierarchy only to avoid Jena IRI parse warnings from invalid enum individual IRIs (see above).
-* The JSON-LD context for 2511 is configured via `doc-loader.additional-context` (fetched and Caffeine-cached at startup), following the same pattern as existing Tagus context entries.
-* Path 3 (non-Gaia-X VC 2.0) intentionally bypasses Gaia-X type resolution — future trust framework support for non-Gaia-X federations will add pluggable type resolution.
+* Removing Tagus support eliminates the disconnected-graph problem entirely — no `legacy-type` configuration, no per-format URI branching for Tagus.
+* The 2511 OWL and SHACL files are bundled as classpath resources (fetched from the Gaia-X registry at development time), avoiding a runtime dependency on registry availability. The OWL file is stripped to class hierarchy only to avoid Jena IRI parse warnings from invalid enum individual IRIs (see above).
+* The JSON-LD context for 2511 is configured via `doc-loader.additional-context` (fetched and Caffeine-cached at startup).
+* Non-Gaia-X VC 2.0 (`VC2_DANUBETECH`) intentionally bypasses Gaia-X type resolution — future trust framework support for non-Gaia-X federations will add pluggable type resolution.
+* The SRS preamble envisions the catalogue as a generic, trust-framework-agnostic metadata store. Removing a single legacy trust framework generation aligns with this direction — the catalogue's verification pipeline is designed to be pluggable, not permanently coupled to any specific Gaia-X release.
 

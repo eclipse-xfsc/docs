@@ -61,7 +61,7 @@ The identifier must be a valid IRI (see ADR 7).
 |The Gaia-X v2 trust framework generation, corresponding to ICAM 24.07. Loire credentials use the `https://w3id.org/gaia-x/2511#` namespace, W3C VC 2.0 data model, and JWT envelopes with VC-JOSE-COSE headers. Replaces the Tagus generation. See ADR 8, ADR 9.
 
 |Tagus
-|The Gaia-X v1 trust framework generation, corresponding to ICAM 22.10. Tagus credentials use the `gax-core:` / `gax-trust-framework:` namespaces, W3C VC 1.1 data model, and JSON-LD with data-integrity proofs (JsonWebSignature2020). Supported alongside Loire for backward compatibility.
+|The Gaia-X v1 trust framework generation, corresponding to ICAM 22.10. Tagus credentials used the `gax-core:` / `gax-trust-framework:` namespaces, W3C VC 1.1 data model, and JSON-LD with data-integrity proofs (JsonWebSignature2020). **No longer supported** — the catalogue rejects VC 1.1 context URIs and Linked Data proofs. Credentials must be re-issued in Loire/VC 2.0 format. See ADR 9.
 
 |ICAM 24.07
 |Gaia-X Identity, Credential and Access Management specification version 24.07. Defines the Loire credential format, including JWT payload structure (credential as top-level payload, no `vc`/`vp` claim wrapper), `EnvelopedVerifiableCredential` for VP embedding, and mandatory trust anchor chain validation.

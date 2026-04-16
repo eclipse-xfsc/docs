@@ -30,3 +30,14 @@ The details for configuring the backup as well as the backup encryption depends 
 The components use ```Slf4j``` for logging. ```Logback``` will be used as implementation.
 
 As default, all components should log to Standard out. Log aggregation is realized by the surrounding environment
+
+=== Admin Configuration Persistence
+
+Admin configuration is backed by two PostgreSQL tables. The `trust_frameworks` table holds structured trust framework definitions (columns: `id`, `name`, `service_url`, `api_version`, `timeout_seconds`, `enabled`, `created_at`, `updated_at`), seeded with a single Gaia-X entry. The `admin_config` table is a generic key-value store (`config_key` PK, `config_value`) for all other runtime settings:
+
+[options="header",cols="2,3"]
+|===
+| Key | Purpose
+| `schema.module.{TYPE}.enabled` | Enable/disable individual schema validation modules (SHACL, JSON_SCHEMA, XML_SCHEMA, OWL)
+| `graphstore.preferred.backend` | Preferred graph database backend
+|===

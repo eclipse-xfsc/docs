@@ -25,3 +25,38 @@ NOTE: CAT-NFR-01footnote:[Enhancement of the XFSC Federated Catalogue. 2025. htt
 <<img_deployment_view>> shows the default ports for the components' interaction. The connection settings (hostnames, ports) are configurable. It is recommended to replace the default credentials. To store persistent data, the `Federated Catalogue Server`, `PostgreSQL` as well as the graph database (Neo4j or Fuseki) require a volume, which must be mounted into the container. Non-RDF assets are stored in a separate File Store directory (`federated-catalogue.file-store.asset.location`), which also requires a persistent volume in production.
 
 Kubernetesfootnote:[https://kubernetes.io/[Kubernetes]] is the recommended infrastructure for production deployment. For development, Dockerfootnote:[https://www.docker.com/[Docker: Accelerated, Containerized Application Development]] in combination with docker-compose can be used.
+
+=== Admin UI — Keycloak Setup
+
+==== Admin Role
+
+Users need the `ADMIN_ALL` client role to access `/admin/**` endpoints. Without it, the admin UI is hidden and returns HTTP 403.
+
+==== Environment Configuration
+
+Realm files are organized by environment in `keycloak/realms/{dev,staging,prod}/`. The `KC_REALM_ENV` variable selects which to load at startup.
+
+[options="header",cols="1,2"]
+|===
+| Directory | Target environment
+| `keycloak/realms/dev/` | Local development
+| `keycloak/realms/staging/` | Staging
+| `keycloak/realms/prod/` | Production
+|===
+
+==== iFrame Embedding — Security Headers
+
+The user management page embeds the Keycloak Admin Console in an iFrame. Update these headers in **both `master` and `gaia-x` realms** (via Realm Settings → Security Defenses, or in the realm JSON):
+
+[options="header",cols="1,2"]
+|===
+| Header | Change
+| `xFrameOptions` | Remove (set to empty string `""`)
+| `contentSecurityPolicy` | Add `<portal-origin>` to `frame-ancestors`
+|===
+
+Replace `<portal-origin>` with your portal URL (e.g., `http://localhost:8088` for dev, `https://catalogue.example.com` for prod). Bundled realm files already have preliminary values.
+
+==== Admin Console URL
+
+The demo portal auto-derives the Admin Console URL from `keycloak.auth-server-url` and `keycloak.realm` (aliased as `admin.dashboard.keycloak-auth-server-url` / `admin.dashboard.keycloak-realm`). Override with `KEYCLOAK_ADMIN_CONSOLE_URL` (or `admin.dashboard.keycloak-admin-console-url`) if Keycloak is behind a different hostname.
