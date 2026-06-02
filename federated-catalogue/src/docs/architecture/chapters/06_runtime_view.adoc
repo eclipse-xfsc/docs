@@ -1213,7 +1213,7 @@ When calling `GET /verification` a static HTML page is returned, which allows to
 
 ==== Request verification for a Credential
 
-The `/verification` endpoint accepts optional query parameters to override the server-level defaults per request: `verifySemantics`, `verifySchema`, `verifyVPSignature`, `verifyVCSignature` (all boolean, defaulting to the server configuration). This allows callers to test specific verification aspects in isolation.
+The `/verification` endpoint accepts optional query parameters to override the server-level defaults per request: `verifySemantics`, `verifyVPSignature`, `verifyVCSignature` (all boolean, defaulting to the server configuration), and `requireBaseClass` (boolean, default `false`, opt-in base-class compliance). This allows callers to test specific verification aspects in isolation and to opt into base-class validation.
 
 [mermaid, width=2000]
 ....
@@ -1222,16 +1222,12 @@ sequenceDiagram
     actor User
     participant API
     participant VerificationService
-    User ->> + API:POST /verification<br>(?verifySchema=...&verifyVPSignature=...&verifyVCSignature=...)
-    API ->> + VerificationService:verifyCredential(credential, verifySemantics, verifySchema, verifyVPSig, verifyVCSig)
+    User ->> + API:POST /verification<br>(?verifySemantics=...&verifyVPSignature=...&verifyVCSignature=...&requireBaseClass=...)
+    API ->> + VerificationService:verifyCredential(credential, verifySemantics, verifyVPSig, verifyVCSig, requireBaseClass)
     VerificationService ->> VerificationService: [Verify Syntax]
     opt verifySemantics [default true]
         VerificationService ->> VerificationService: [Verify Semantic]
         VerificationService ->> VerificationService: [Extract Credential Type]
-    end
-    opt verifySchema [default false]
-        VerificationService ->> SchemaValidationService: [Validate Claims vs SHACL]
-        SchemaValidationService -->> VerificationService: SemanticValidationResult
     end
     opt signature verification [verifyVPSig / verifyVCSig - default false]
         VerificationService ->> VerificationService: [Verify Signatures]
@@ -1333,7 +1329,7 @@ sequenceDiagram
 The verification of credentials consists of up to four stages, each independently configurable (see <<_verification_profiles>>).
 Besides verifying the credential, additional tasks are executed (e.g., format detection, parsing, claim extraction).
 
-`VerificationServiceImpl` acts as a thin Context in the Strategy pattern: it resolves per-request verification toggles and delegates payload processing to one of two `RdfIngestionStrategy` implementations — `CredentialVerificationStrategy` for recognised credentials (and ambiguous JWTs, which it rejects explicitly), `NonCredentialIngestionStrategy` for non-credential RDF payloads.
+`VerificationServiceImpl` acts as a thin Context in the Strategy pattern: it resolves per-request verification toggles and delegates payload processing to one of two `RdfIngestionStrategy` implementations — `CredentialIngestionStrategy` for recognised credentials (and ambiguous JWTs, which it rejects explicitly), `NonCredentialIngestionStrategy` for non-credential RDF payloads.
 The credential strategy contains the full VP/VC parsing, semantic validation, schema validation, signature verification, claim extraction, and protected-namespace filtering logic.
 If any triples referencing the `fcmeta:` namespace are filtered, a user-visible warning is included in the `CredentialVerificationResult`.
 See <<_verification_strategy_pattern>> for details.
@@ -1348,13 +1344,8 @@ See <<_format_detection>>.
 
 **Semantic verification** validates the credential subject `@type` against the loaded ontologies. This is active by default and catches type mismatches early. The ontology bundle contains the Loire 2511 namespace (`\https://w3id.org/gaia-x/2511#`) — see ADR 9.
 
-**Schema validation** (when enabled) checks the uploaded credentials against a composite schema of type SHACL.
-If a credential does not conform to the composite schema, a verification exception is thrown with a message containing the validation report. In that case, the verification process does not proceed, and claims are not extracted.
-Automatic schema validation against stored SHACL shapes is **disabled by default in the upload verification flow** and is gated by the operator-controlled upload-time SHACL switch.
-When enabled, upload verification still routes through `SchemaValidationService` (see <<_schema_validation_service>>).
-On-demand validation of stored assets — covering SHACL, JSON Schema, and XML Schema — is provided by the dedicated `AssetValidationService` (see <<_on_demand_asset_validation>>); both flows evaluate SHACL via the same TopBraid SHACL engine.
-
-NOTE: For backward compatibility, automatic schema validation during upload can be re-enabled at boot time; the property name is documented in the wiki configuration guide.
+**Schema validation** is not performed during credential upload.
+On-demand validation of stored assets — covering SHACL, JSON Schema, and XML Schema — is provided by the dedicated `AssetValidationService` (see <<_on_demand_asset_validation>>); it is accessed via `POST /assets/validate`.
 
 **Cryptographic verification (trust verification)** (when enabled) verifies JWT signatures. The `JwtSignatureVerifier` verifies the compact JWT signature by resolving the issuer's DID document, matching the `kid` to an `assertionMethod` verification method, and verifying the JWS with nimbus-jose-jwt. Key security constraints:
 

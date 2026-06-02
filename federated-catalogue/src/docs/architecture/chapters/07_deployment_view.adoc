@@ -65,6 +65,6 @@ Step-by-step operator procedures for realm bootstrap, role assignment, iframe he
 
 === Runtime Admin Configuration
 
-Most catalogue features that an operator can flip at runtime — including the per-schema-language toggles (SHACL, JSON Schema, XML Schema, OWL) and the per-trust-framework enabled flag — are persisted by the catalogue and survive restarts.
-They do not require additional environment variables.
-The start-up SHACL configuration switch (which determines whether SHACL is consulted at all during credential upload) and the runtime module toggles operate at different layers; see ADR 16 for the toggle semantics, including the asymmetric role of the OWL toggle (which gates base-class resolution rather than a validator).
+Most catalogue features that an operator can flip at runtime are persisted in the `admin_config` PostgreSQL table — including the four schema-module toggles (`schema.module.SHACL.enabled`, `schema.module.JSON_SCHEMA.enabled`, `schema.module.XML_SCHEMA.enabled`, `schema.module.OWL.enabled`) and the per-framework enabled flag in `trust_frameworks`. Values written through the admin endpoints survive restarts; no new environment variables are introduced by this layer.
+
+The four `schema.module.*.enabled` rows (admin-controlled booleans) gate the corresponding validator wherever it would otherwise run on the on-demand `POST /assets/validate` path. Schema validation is never run automatically on the credential upload path. See ADR 16 for the toggle semantics, including the asymmetric role of the OWL toggle (which gates base-class resolution).
