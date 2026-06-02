@@ -1673,29 +1673,18 @@ Found if no HR asset is linked yet). Content retrieval is exposed via
 surfaced in the metadata response as `humanReadableId` (on MR assets) and `machineReadableId`
 (on HR assets).
 
-Accepted content types for human-readable representations:
+Accepted content types for human-readable representations are governed by a configurable two-layer scheme:
 
-[options="header",cols="1,2"]
-|===
-| MIME type | Format
-| `application/pdf` | PDF
-| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | DOCX
-| `text/html` | HTML
-| `text/plain` | Plain text
-|===
+* an **allowlist** that admits broad MIME families typically used for human-facing attachments (textual formats, common office and document formats), and
+* a **denylist** that explicitly rejects scripting and active-content subtypes — `image/svg+xml`, JavaScript/ECMAScript/VBScript flavours, and similar — even when they would otherwise match the family allowlist.
 
-These are the default values of `federated-catalogue.assets.human-readable-content-types`.
-The same allowlist is enforced for both `POST /assets/{mrId}/human-readable` and
+The same scheme is enforced for both `POST /assets/{mrId}/human-readable` and
 `PUT /assets/{mrId}/human-readable`.
-
-* `application/pdf` and `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
-  cover the main document formats typically exchanged as human-facing attachments.
-* `text/html` supports web-renderable human-readable pages.
-* `text/plain` supports lightweight textual explanations, notes, or readme-style content.
-* Validation is strict against the configured `Content-Type` header. Unsupported types are
-  rejected with `400 Bad Request`.
-* A missing `Content-Type` is treated as `application/octet-stream`, which is not accepted by
-  default and is therefore rejected as well.
+Validation is strict against the configured `Content-Type`
+header; unsupported or denylisted types are rejected with `400 Bad Request`.
+A missing
+`Content-Type` is treated as `application/octet-stream`, which is not accepted by default.
+The current default allowlist, denylist and the configuration keys that override them are documented in the OpenAPI specification.
 
 This restriction is intentional: the human-readable link endpoint is meant for documents that a
 person can read directly. Generic binary files can still be uploaded as regular assets, but they
