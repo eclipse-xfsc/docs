@@ -1019,6 +1019,10 @@ The `AssetStore` provides two parallel access paths: **hash-based** methods (int
 The `deleteAsset(hash)` and `changeLifeCycleStatus(hash, status)` methods are the deliberate exceptions — both remain hash-based to guarantee unambiguous single-row targeting.
 See ADR 7, Hash-Based Mutation Operations Exception. `deleteAsset` publishes an `AssetDeletedEvent` after the row deletion, triggering cascade cleanup of associated validation results and provenance credentials (see <<_validation_result_storage>>).
 
+In addition to the hash-based path, the asset store exposes `deleteByAssetId(id)` — an idempotent cascade keyed by the asset IRI. It removes the live row, its human-readable companion, and (via the same `AssetDeletedEvent`) the validation-result and provenance-credential rows attached to the asset. A second call against the same identifier resolves to a no-op so that demo scripts and integration test fixtures can reset state without environment teardown. Cross-participant access is gated on the live row's issuer when present; an unknown identifier always succeeds with `204` and reveals nothing about the catalogue's contents. The underlying audit log of past content revisions is preserved.
+
+The asset version counter is defined as the number of distinct content hashes observed across the entity's audit history. Saves that change non-content fields (linking a human-readable companion, lifecycle-status transitions, last-modified bookkeeping) reuse an existing hash and therefore do not advance the counter. This matches the SRS rule that linking a sub-resource to an asset must not produce a new asset version.
+
 The `IriGenerator` assigns IRIs before storage: it extracts IRIs from RDF content (`credentialSubject.id`, `@id`, ontology/shapes/vocabulary IRIs) or generates UUID URNs (RFC 4122) for non-RDF assets and as fallback. The `IriValidator` checks all assigned IRIs against supported formats (DIDs, UUID URNs, generic URNs, HTTP/HTTPS IRIs) — returning `true`/`false`. Callers decide how to handle invalid IRIs (fallback to UUID URN, or reject the request).
 
 The asset metadata is stored in the metadata store, using the following data model:

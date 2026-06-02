@@ -779,11 +779,11 @@ sequenceDiagram
 
 ==== Attaching a Provenance Credential
 
-Stores a W3C VC 2.0 JSON-LD or VC-JWT provenance credential against a specific asset version. The optional `?version=X` query parameter targets a historical version (1-based ordinal); omitting it targets the current version. The write does **not** produce a new Envers revision on the asset.
+Stores a W3C VC 2.0 JSON-LD or VC-JWT provenance credential against a specific asset version. The optional `?version=X` query parameter targets a historical version (1-based ordinal); omitting it targets the current version. Attaching a provenance credential does **not** advance the asset's version counter — the counter reflects distinct content hashes, not metadata or sub-resource events.
 
 `credentialSubject.id` in the VC must equal `{assetId}:v{N}` — any mismatch returns 400. VC 1.1 payloads and payloads using the CAT-internal namespace are also rejected with 400. A duplicate `credentialId` (VC `id` field) returns 409.
 
-When a graph store is active, the corresponding PROV-O triple is written under the versioned asset IRI `{assetId}:v{N}` as a side-effect.
+`credentialSubject` MAY declare any combination of the recognised PROV-O predicates: `prov:wasGeneratedBy`, `prov:wasDerivedFrom`, `prov:wasAttributedTo`, `prov:wasRevisionOf`, `prov:generated`, `prov:used`, `prov:wasAssociatedWith`, `prov:actedOnBehalfOf`. Both compact (`prov:X`) and expanded (`http://www.w3.org/ns/prov#X`) forms are accepted. When a graph store is active, **every** recognised predicate is projected as its own triple under the versioned asset IRI `{assetId}:v{N}`; the predicate that appears first on `credentialSubject` is also written to the relational store as the row's primary type discriminator for filtering.
 
 [mermaid, width=2000]
 ....
