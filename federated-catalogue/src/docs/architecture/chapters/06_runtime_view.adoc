@@ -557,7 +557,9 @@ sequenceDiagram
 
 ==== Requesting a specific Asset
 
-Assets can be retrieved by their IRI. The IRI is URL-encoded in the path parameter. The optional `?version=X` query parameter retrieves a specific historical version (1-based ordinal). Without it, the current version is returned. A non-existent version number returns HTTP 404.
+Assets can be retrieved by their IRI; the IRI is URL-encoded in the path parameter.
+An optional version query parameter retrieves a specific historical version (1-based ordinal); without it, the current version is returned.
+The OpenAPI specification carries the exact endpoint contract and the error response for unknown versions.
 
 [mermaid, width=2000]
 ....
@@ -663,15 +665,19 @@ sequenceDiagram
 
 **Step 7-8:** `IriGenerator` generates a UUID URN (`urn:uuid:...`) per RFC 4122 for the non-RDF asset. Each upload receives a unique IRI.
 
-**Step 9:** `storeUnverified` persists the metadata (including the assigned IRI) in PostgreSQL. If an asset with the same content hash already exists, HTTP 409 (Conflict) is returned with the existing IRI in the error response.
+**Step 9:** `storeUnverified` persists the metadata (including the assigned IRI) in the relational metadata store.
+If an asset with the same content hash already exists, the upload is rejected as a conflict with the existing IRI returned in the error response.
 
 **Step 11:** The raw bytes are written to the `assetFileStore`, not the schema/context File Store.
 
 ==== Updating an Asset
 
-Assets are updated via `PUT /assets/{id}`. The update is applied in-place on the single row for that IRI; Hibernate Envers captures the previous state as a new revision in `assets_aud` automatically. No DEPRECATED row is created. The optional `changeComment` query parameter is recorded on the new revision.
+Assets are updated via the asset-update endpoint (see the OpenAPI specification).
+The update is applied in-place on the single row for that IRI; the audit framework captures the previous state as a new revision automatically.
+No new lifecycle row is created.
+An optional change-comment parameter is recorded on the new revision.
 
-The IRI extracted from the credential body must match the path `{id}`. If they diverge, HTTP 400 is returned.
+The IRI extracted from the credential body must match the IRI in the request path; divergence is rejected as a bad request.
 
 [mermaid, width=2000]
 ....
@@ -689,7 +695,7 @@ sequenceDiagram
     API ->> + VerificationService:verifyCredential(credential)
     VerificationService -->> - API:CredentialVerificationResult
     API ->> + AssetStore:storeCredential(AssetMetadata, CredentialVerificationResult)
-    Note right of AssetStore: In-place UPDATE - Envers records previous state in assets_aud
+    Note right of AssetStore: In-place UPDATE - audit framework records previous state in the asset audit shadow
     AssetStore -->> - API:OK
     API -->> - User:200 Asset
 ....
@@ -713,7 +719,7 @@ sequenceDiagram
     API --> API:Check[credential-participant == user-participant | Ro-MU-CA]
     alt credential.type != Participant
         API -->> User: [Error. Use Participant API]
-        Note right of User: The handling of participant credentials is still open. See #6
+        Note right of User: The handling of participant credentials is still open.
     else credential.type == Offering
         API ->> + AssetStore: changeLifeCycleStatus(assetHash, REVOKED)
         AssetStore -->> GraphDB: deleteClaims(credentialSubject)
@@ -725,7 +731,8 @@ sequenceDiagram
 
 ==== Get Asset Version History
 
-Returns the full version history for an asset, ordered newest-first. Supports pagination via `?page` and `?size` (defaults: 0 and 20). Returns HTTP 404 if the asset IRI is unknown.
+Returns the full version history for an asset, ordered newest-first, with standard page/size pagination parameters.
+The OpenAPI specification carries the exact parameter names, defaults, and error response for an unknown IRI.
 
 [mermaid, width=2000]
 ....
@@ -748,7 +755,9 @@ sequenceDiagram
 
 ==== Revoking a Specific Asset Version
 
-Revokes the current version of an asset by version ordinal. Only the current (latest) version can be revoked — attempting to revoke a historical version returns HTTP 409. After revocation the asset is unavailable via `GET /assets/{id}` (404) until a new version is uploaded.
+Revokes the current version of an asset by version ordinal.
+Only the current (latest) version can be revoked — attempting to revoke a historical version is rejected as a conflict.
+After revocation the asset is unavailable via the asset-retrieval endpoint until a new version is uploaded.
 
 [mermaid, width=2000]
 ....
@@ -941,7 +950,8 @@ sequenceDiagram
 
 ==== Get a Schema
 
-The optional `?version=X` query parameter retrieves a specific historical version. Without it, the current version is returned. A non-existent version number returns HTTP 404.
+An optional version query parameter retrieves a specific historical version; without it, the current version is returned.
+The OpenAPI specification carries the exact parameter name and the error response for unknown versions.
 
 [mermaid, width=2000]
 ....
@@ -1062,7 +1072,7 @@ sequenceDiagram
 
 * No RDF parsing, type detection, or term extraction occurs.
 * No graph database interaction — the schema is not added to the composite schema graph.
-* The identifier is content-addressable (`urn:schema:sha256:<hash>`); uploading identical content returns HTTP 409 Conflict.
+* The identifier is content-addressable (a `urn:schema:sha256:<hash>` URN); uploading identical content is rejected as a conflict.
 * The schema appears in `GET /schemas` under the `jsonSchemas` or `xmlSchemas` list.
 
 
@@ -1136,9 +1146,13 @@ When calling `GET /query` a HTML page with a query input form is displayed.
 
 ==== Query the catalogue
 
-The query endpoint uses the `Content-Type` header to select the query language: `application/opencypher-query` for openCypher (Neo4j backend) or `application/sparql-query` for SPARQL-star (Fuseki backend). The request body is raw query text (not a JSON wrapper). Queries in a language not supported by the active backend are rejected with HTTP 415 (Unsupported Media Type), including a message that names the active backend, the supported language and the expected `Content-Type`. When the graph store is disabled (`graphstore.impl=none`), queries are rejected with HTTP 503 (Service Unavailable).
+The query endpoint uses the `Content-Type` header to select the query language: `application/opencypher-query` for openCypher (Neo4j backend) or `application/sparql-query` for SPARQL-star (Fuseki backend).
+The request body is raw query text (not a JSON wrapper).
+Queries in a language not supported by the active backend are rejected with an "unsupported media type" response that names the active backend, the supported language, and the expected content-type.
+When the graph store is disabled, queries are rejected with a "service unavailable" response.
 
-Only read queries are allowed. Write queries (e.g., `CREATE`/`DELETE` in openCypher, `INSERT`/`DELETE` in SPARQL) are rejected with HTTP 500.
+Only read queries are allowed.
+Write queries (e.g., `CREATE`/`DELETE` in openCypher, `INSERT`/`DELETE` in SPARQL) are rejected.
 
 [mermaid, width=2000]
 ....
@@ -1230,12 +1244,16 @@ sequenceDiagram
 ....
 
 === Detailed sub-scenarios
-The previous section described the sce
-This section describes some sub scenarios, that occure
+
+The preceding sections described the end-to-end scenarios.
+This section zooms in on the recurring sub-scenarios that they share — internal flows that are referenced from several places above and benefit from being explained once in detail.
 
 ==== Store Credentials to the Asset Store
 This sequence diagram shows the detailed flow when storing credentials in the Asset Store.
-Each IRI maps to a single row in the metadata store. On first upload, a new row is inserted (version 1). On subsequent uploads for the same IRI, the existing row is updated in-place; Hibernate Envers captures the previous state automatically in `assets_aud`. Concurrent modifications are serialized by the database row-level lock on the UPDATE.
+Each IRI maps to a single row in the metadata store.
+On first upload, a new row is inserted (version 1).
+On subsequent uploads for the same IRI, the existing row is updated in-place; the audit framework captures the previous state automatically in the asset audit shadow.
+Concurrent modifications are serialized by the database row-level lock on the UPDATE.
 
 [mermaid, width=2000]
 ....
@@ -1250,7 +1268,7 @@ sequenceDiagram
         MetaData -->> AssetStore:existing row or NULL
         alt existing row found (update)
             AssetStore ->> MetaData:updateInPlace(fields, changeComment)
-            Note right of MetaData: Envers records previous state in assets_aud
+            Note right of MetaData: Audit framework records previous state in the asset audit shadow
             MetaData -->> AssetStore:OK
             AssetStore ->> GraphDB:deleteClaims(credentialSubject)
         else no existing row (first upload)
@@ -1332,11 +1350,11 @@ See <<_format_detection>>.
 
 **Schema validation** (when enabled) checks the uploaded credentials against a composite schema of type SHACL.
 If a credential does not conform to the composite schema, a verification exception is thrown with a message containing the validation report. In that case, the verification process does not proceed, and claims are not extracted.
-Automatic schema validation against stored SHACL shapes is **disabled by default in the upload verification flow** and is gated by `federated-catalogue.verification.schema`.
+Automatic schema validation against stored SHACL shapes is **disabled by default in the upload verification flow** and is gated by the operator-controlled upload-time SHACL switch.
 When enabled, upload verification still routes through `SchemaValidationService` (see <<_schema_validation_service>>).
 On-demand validation of stored assets — covering SHACL, JSON Schema, and XML Schema — is provided by the dedicated `AssetValidationService` (see <<_on_demand_asset_validation>>); both flows evaluate SHACL via the same TopBraid SHACL engine.
 
-NOTE: For backward compatibility, automatic schema validation during upload can be re-enabled via the configuration property `federated-catalogue.verification.schema=true`.
+NOTE: For backward compatibility, automatic schema validation during upload can be re-enabled at boot time; the property name is documented in the wiki configuration guide.
 
 **Cryptographic verification (trust verification)** (when enabled) verifies JWT signatures. The `JwtSignatureVerifier` verifies the compact JWT signature by resolving the issuer's DID document, matching the `kid` to an `assertionMethod` verification method, and verifying the JWS with nimbus-jose-jwt. Key security constraints:
 

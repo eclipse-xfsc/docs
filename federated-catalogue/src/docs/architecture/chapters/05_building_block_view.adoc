@@ -8,10 +8,22 @@ ifndef::imagesdir[:imagesdir: ../../images]
 
 :toc:
 
-[[section-building-block-viev]]
+[[section-building-block-view]]
+== Building Block View
 
-== Overall System overview
-This document describes the architecture of the Federated Catalogue, a component inside the Gaia-X Ecosystem. It is a component of the Gaia-X Federation Services defined by the GXFS-DE project.
+This chapter is the longest in the document and is organised in three levels of zoom:
+
+* **Level 1 — Components of the Federated Catalogue.** The handful of components that an external observer can see (Catalogue, Authentication, Graph-DB, File Store, Metadata Store).
+* **Level 2 — Inside the Catalogue.** Verification pipeline, schema management, validator cache, audit history, file store, metadata store, asset upload service, link service, admin API.
+* **Level 3 — Internal abstractions and data types.** Claim model, validator interface, low-level record types.
+
+Read top-to-bottom for orientation; jump by section for reference.
+Cross-cutting concerns (trust-framework bundles, admin configuration persistence, security posture, asset content-kind taxonomy) are in <<section-concepts>>.
+
+=== Overall System overview
+
+This document describes the architecture of the Federated Catalogue, a component of the XFSC stack within the Gaia-X ecosystem.
+It originates in the Gaia-X Federation Services originally defined by the GXFS programme (2021–2024); see the glossary entry for GXFS / XFSC.
 
 The Federated Catalogue is used to store and index assets (including credentials and non-RDF files) and to answer queries over this index. The basic integration into the Federation Services is shown in <<system_overview>>.
 
@@ -54,7 +66,9 @@ The architecture of the core component is described in the next sections.
 
 ==== Authentication
 
-The authentication component is responsible for authenticating users. This is not a central component of the catalogue, as it will be implemented by Lot 1 "Authentication & Authorization" of the GXFS-DE project. For the catalogue implementation, a mock integration is shown, using common, off the shelf software that implements the OpenID Connect standardfootnote:[https://openid.net/connect/[OpenID Connect]].
+The authentication component is responsible for authenticating users.
+It is not a central component of the catalogue itself; the original GXFS programme delivered it in a sibling lot ("Authentication & Authorization") and the same separation is preserved in XFSC.
+For the catalogue implementation, a mock integration is shown, using common, off-the-shelf software that implements the OpenID Connect standardfootnote:[https://openid.net/connect/[OpenID Connect]].
 
 The responsibilities of the authentication components are:
 
@@ -93,15 +107,18 @@ The graph database backend is **pluggable**. Three adapters are available:
 | `NONE` | No-op / disabled | —
 |===
 
-All three adapters are wired unconditionally at boot. A single `RoutingGraphStore` (marked `@Primary`) holds the currently-active adapter behind a volatile reference and delegates every `GraphStore` call to it. Core services contain no backend-specific logic; they depend on `GraphStore` only.
+All three adapters are wired unconditionally at boot.
+A single `RoutingGraphStore` (marked `@Primary`) holds the currently-active adapter behind a volatile reference and delegates every `GraphStore` call to it; core services contain no backend-specific logic and depend on `GraphStore` only.
+The full description of the `GraphStore` interface and the routing-store behaviour lives in <<_graph_store,Graph Store>> further down this chapter.
 
 The active backend is resolved on cold boot in the following order:
 
-. `admin_config[graphstore.preferred.backend]` — the persisted preference set by a prior admin switch.
-. `graphstore.impl` configuration property — the deployment-time bootstrap.
-. `NONE` — fallback so the application boots even without a configured graph store.
+. The persisted preference set by a prior admin switch.
+. The deployment-time bootstrap configuration.
+. A no-op fallback so the application boots even without a configured graph store.
 
-Per-backend connection URIs (`graphstore.neo4j.uri`, `graphstore.fuseki.uri`) are both read at startup so a switch can target either backend without configuration changes. Each adapter opens a driver lazily on first use, so an unreachable backend at boot does not prevent the application from starting.
+Per-backend connection URIs for both Neo4j and Fuseki are read at startup so a switch can target either backend without configuration changes.
+Each adapter opens a driver lazily on first use, so an unreachable backend at boot does not prevent the application from starting.
 
 Operators change the active backend through the Admin API (see <<_admin_api>>). The change takes effect in process on the next call — no JVM restart.
 
@@ -124,13 +141,15 @@ We chose not to implement a workaround that involves query rewriting, as this ma
 
 The Fuseki backend uses Apache Jena with RDF-star.
 Claims are stored as RDF-star triple nodes: `<<( subject predicate object )>> cred:credentialSubject credentialSubjectUri`.
-Queries must use SPARQL-star syntax (RDF 1.2 `<<( )>>` syntax, as supported by Jena 5.5+).
+Queries must use SPARQL-star syntax (RDF 1.2 `<<( )>>` syntax).
 Results are shuffled unless the query contains an `ORDER BY` clause.
 
 ==== File Store
 The File Store is responsible to persist all file based content submitted to the catalogue. These are credentials (Verifiable Presentations or standalone Verifiable Credentials), Schemas, and non-RDF assets.
 
-Non-RDF assets are stored in a dedicated File Store instance (`assetFileStore`), configured via `federated-catalogue.file-store.asset.location`. This keeps asset blobs separate from schema definitions and context caches for operational clarity. In production (`scope=runtime`), the asset location must be explicitly configured; the application fails to start if it is missing.
+Non-RDF assets are stored in a dedicated File Store instance, kept separate from schema definitions and context caches for operational clarity.
+In production the asset-store location must be explicitly configured; the application fails to start if it is missing.
+The exact configuration property is documented in the wiki configuration guide.
 
 For the sake of simplicity, a folder in the file system is used as file store. For future scalability the file store can be simply realized using an Object Storage or Database.
 
@@ -158,7 +177,7 @@ a| Responsible for applying the defined verification rules on credentials (Verif
 * **Verification pipeline:** Syntactic, semantic, and cryptographic verification of credentials. The credential is checked as a whole — if VC verification fails, the entire verification fails.
 * **Strategy pattern:** `VerificationServiceImpl` acts as a thin Context that delegates to one of two `RdfIngestionStrategy` implementations — `CredentialVerificationStrategy` (recognised credentials and ambiguous JWTs) or `NonCredentialIngestionStrategy` (plain RDF payloads ingested as raw triples).
 * **Format detection:** `CredentialFormatDetector` classifies incoming RDF content by iterating an ordered chain of `CredentialFormatProcessor` beans. Recognized credential formats (Loire JWT, VC 2.0) enter the credential verification pipeline. Content classified as `UNKNOWN` (no recognized credential format) is routed to `NonCredentialIngestionStrategy`, which delegates triple extraction to `ClaimExtractionService.extractAllTriples()`. See <<_format_detection>>.
-* **Non-credential RDF extraction:** For RDF assets that are not Gaia-X Credentials, `NonCredentialIngestionStrategy` extracts all triples using Apache Jena via `ClaimExtractionService`. Supports JSON-LD, Turtle, N-Triples, and RDF/XML via a format fallback sequence. Returns a `NonCredentialVerificationResult` containing all extracted `RdfClaim` instances. See <<_non_credential_rdf_extraction>>.
+* **Non-credential RDF extraction:** For RDF assets that are not Gaia-X Credentials, `NonCredentialIngestionStrategy` extracts all triples using Apache Jena via `ClaimExtractionService`. Supports JSON-LD, Turtle, N-Triples, and RDF/XML via a format fallback sequence. Returns a `NonCredentialVerificationResult` containing all extracted claims (each one a subject–predicate–object triple, modelled by the `RdfClaim` record described under <<_claim>> below). See <<_non_credential_rdf_extraction>>.
 * **JWT content preprocessing:** `JwtContentPreprocessor` detects JWT-wrapped credentials using a two-signal approach (Content-Type header as primary signal, body prefix as fallback) and unwraps the JWT envelope to produce JSON-LD for downstream processing. See <<_jwt_content_preprocessing>>.
 * **JWT signature verification:** `JwtSignatureVerifier` verifies compact JWT signatures by resolving the issuer's DID document, matching `kid` to an `assertionMethod` verification method, and cryptographically verifying the JWS. Also verifies inner VC JWTs from `EnvelopedVerifiableCredential` entries in VP JWTs. See <<_jwt_signature_verification>>.
 * **Loire JWT parsing:** `LoireJwtParser` decodes Loire-format JWTs where the credential is the top-level JWT payload (no `vc`/`vp` claim wrapper), conforming to ICAM v24.07. See <<_loire_jwt_parsing>>.
@@ -182,7 +201,7 @@ NOTE: Non-RDF schemas (JSON Schema, XML Schema) bypass the Schema Store entirely
 | RDF Detector | Classifies uploaded content as RDF or non-RDF based on a configurable MIME type allowlist and content inspection. For `application/json`, the detector checks for a JSON-LD `@context` key to distinguish JSON-LD (RDF) from plain JSON (non-RDF). Note that `application/schema+json` (JSON Schema) and `application/xml` (XSD) are always classified as non-RDF — even though they are schema formats, they are not RDF and do not enter the RDF verification pipeline.
 | Asset Upload Service | Orchestrates the dual-path upload flow: extracts request data, delegates to `RdfDetector` for classification, then routes to either the verification pipeline (RDF) or direct asset storage (non-RDF).
 | Asset Link Service | Manages bidirectional links between machine-readable (RDF) assets and human-readable representations (e.g., PDF, DOCX). Link metadata is stored directly on the `assets` table via an `asset_type` column and a `linked_asset_id` FK; supplementary `fcmeta:hasHumanReadable` / `fcmeta:hasMachineReadable` RDF triples are written to the graph DB.
-| Validation Result Storage | Persists the outcome of on-demand asset validation. Each `ValidationResult` record is stored in PostgreSQL (`validation_result` table) and projected as `fcmeta:` triples in the graph store (`SYNCED`/`FAILED`). Retrieval is exposed via `GET /assets/{id}/validations` (paginated) and `GET /validations/{id}`. After a graph backend reset, `GraphRebuilder.rebuildValidationResults()` re-projects all records from PostgreSQL.
+| Validation Result Storage | Persists the outcome of on-demand asset validation. Each result is stored in the relational metadata store and projected as `fcmeta:` triples into the graph store, with a graph-projection status that marks each row as synced or failed. Retrieval (paginated per asset, and single-row retrieval by surrogate identifier) is exposed via the validation endpoints defined in the OpenAPI specification. After a graph-backend reset, the rebuilder re-projects all stored records from the relational store.
 | Metadata Store | Database keeping all the required metadata for the modules. The Metadata Store is _owned_ by the _Store_ components. For separation, each component gets its own set of tables with no relation between them.
 | File Store | Storage system for persisting files (e.g., file system or object store/DB). Separate instances exist for schemas/contexts and for non-RDF assets.
 |===
@@ -274,7 +293,7 @@ classDiagram
     }
 ....
 
-The single `CredentialVerificationResult` type carries the resolved base class (e.g. `Participant`, `ServiceOffering`, `Resource` for the `gaia-x-2511` bundle) as a string field populated from `ResolvedBaseClass.baseClass`.
+The single `CredentialVerificationResult` type carries the resolved base class (e.g. `Participant`, `ServiceOffering`, `Resource` for the `gaia-x-2511` bundle) as a string field populated from `ResolvedBaseClass.baseClass`. *Base class* and *trust-framework bundle* are introduced in <<_trust_framework_bundles_and_base_class_resolution,Trust Framework Bundles and Base-class Resolution>> below; in short, a base class is a top-level credential-subject type declared by a trust-framework bundle (e.g. *Participant* in Gaia-X), and the resolved value drives dispatch and validator selection.
 Typed result subclasses (`CredentialVerificationResultParticipant`, `…Offering`, `…Resource`) and the deprecated schema-validation overloads have been removed; callers use `SchemaValidationService` directly for schema validation.
 
 [#_verification_strategy_pattern]
@@ -396,7 +415,7 @@ After the strategy returns, the service performs one last cross-cutting check: i
 
 `CredentialVerificationStrategy` implements the credential pipeline — format dispatch, JWT signature verification (delegated to the matching `CredentialFormatProcessor`), Loire policy enforcement (`LoirePolicyEnforcer`), EVC/EVP unwrap and inner-VC verification (`EnvelopedCredentialResolver`), JSON-LD unwrap, semantic and schema validation, claim extraction, and protected-namespace filtering.
 `NonCredentialIngestionStrategy` extracts every triple from a plain RDF body via `ClaimExtractionService.extractAllTriples`, applies the protected-namespace filter, and returns a `NonCredentialVerificationResult` — no semantic, schema, or signature verification (those concepts only apply to credentials).
-Both strategies apply `ProtectedNamespaceFilter.filterClaims()` before returning and propagate filter warnings to the result; the `RdfIngestionStrategy` interface Javadoc documents the namespace-filtering requirement (CAT-FR-GD-09) for all implementations.
+Both strategies apply the protected-namespace filter before returning and propagate filter warnings to the result; the ingestion-strategy interface documents the namespace-filtering requirement for all implementations.
 
 `LoireCredentialProcessor` (`@Order(1)`) is the first processor in the chain.
 A credential is Loire if its JWT `typ` header is a Loire value (`vc+jwt`, `vc+ld+json+jwt`, `vp+jwt`, `vp+ld+jwt`) **and** the payload carries a top-level `@context` without a `vc`/`vp` wrapper claim; a contradictory payload (Loire `typ` plus a wrapper claim) is explicitly rejected as `UNKNOWN` so it cannot fall through to the generic VC 2.0 path.
@@ -558,8 +577,8 @@ The filter is applied at three ingestion boundaries:
 |===
 | Boundary | Integration point
 | Credential upload and claim extraction | `CredentialVerificationStrategy.ingest()` — explicitly calls `filterClaims()` after claim extraction; propagates filter warnings to `CredentialVerificationResult.warnings`.
-| Schema import and update (`POST /schemas`, `PUT /schemas/{id}`) | `SchemaStoreImpl.analyzeSchema()` — calls `filterModel()` on the parsed Jena RDF model before schema analysis proceeds; propagates filter warnings to `SchemaResult.warnings` in the API response.
-| Graph rebuild (`POST /actuator/graph-rebuild`) | `GraphRebuilder.addAssetToGraph()` — explicitly calls `filterClaims()` after re-extracting claims from stored credentials, ensuring the rebuilt graph is clean.
+| Schema import and update | `SchemaStoreImpl.analyzeSchema()` — calls the protected-namespace filter on the parsed Jena RDF model before schema analysis proceeds; propagates filter warnings to the schema result in the API response.
+| Graph rebuild | `GraphRebuilder.addAssetToGraph()` — explicitly applies the protected-namespace filter after re-extracting claims from stored credentials, ensuring the rebuilt graph is clean.
 |===
 
 [mermaid, width=2000]
@@ -588,32 +607,19 @@ classDiagram
     ProtectedNamespaceFilter ..> FilteredModel : returns
 ....
 
-Configuration:
-
-[options="header",cols="2,2,3"]
-|===
-| Property | Default | Description
-| `federated-catalogue.verification.protected-namespace.namespace` | `https://projects.eclipse.org/projects/technology.xfsc/federated-catalogue/meta#` | Namespace URI to protect. Normalized on startup: whitespace trimmed; `#` appended if the URI ends with neither `#` nor `/`.
-| `federated-catalogue.verification.protected-namespace.prefix` | `fcmeta` | Short prefix used in log output when reporting filtered triples.
-|===
+The protected-namespace URI and its log-output prefix are operator-configurable so custom deployments can substitute their own metadata namespace; the bundled default points the namespace at the XFSC federated-catalogue meta-namespace under `projects.eclipse.org`, with `fcmeta` as the prefix.
 
 [NOTE]
 ====
 Filtering is unconditional. There is no configuration toggle to disable it. The namespace URI is configurable to support custom deployments, but the filter itself is always active.
 
-Internal services bypass the filter by writing directly to `GraphStore.addClaims()`, which does not pass through the verification pipeline.
+Internal services bypass the filter by writing directly to the graph store, which does not pass through the verification pipeline.
 ====
 
 [#_upload_schema_validation_configuration]
 ===== Schema Validation Configuration
 
-Automatic SHACL schema validation during asset upload is disabled by default. This behavior is controlled by the `schema` verification property.
-
-[options="header",cols="2,1,3"]
-|===
-| Property | Default | Description
-| `federated-catalogue.verification.schema` | `false` | Enable/disable automatic SHACL schema validation during asset upload.
-|===
+Automatic SHACL schema validation during asset upload is disabled by default; an operator-controlled boot-time switch enables it (see the wiki configuration guide for the exact property name).
 
 **When disabled (default):**
 
@@ -629,7 +635,8 @@ Automatic SHACL schema validation during asset upload is disabled by default. Th
 [#_schema_validation_service]
 ===== Schema Validation Service
 
-Automatic schema validation in the upload verification flow is **configurable and disabled by default** (`federated-catalogue.verification.schema=false`). When enabled, upload verification delegates SHACL checks to `SchemaValidationService`; on-demand validation of stored assets is handled by `AssetValidationService` (see <<_on_demand_asset_validation>>).
+Automatic schema validation in the upload verification flow is **configurable and disabled by default**.
+When enabled, upload verification delegates SHACL checks to `SchemaValidationService`; on-demand validation of stored assets is handled by `AssetValidationService` (see <<_on_demand_asset_validation>>).
 
 [mermaid, width=2000]
 ....
@@ -646,7 +653,8 @@ classDiagram
 [#_on_demand_asset_validation]
 ===== On-Demand Asset Validation Service
 
-`AssetValidationService` provides on-demand validation of stored assets against registered validators, invoked via `POST /assets/validate`. It supports RDF assets (JSON-LD, Turtle, N-Triples, RDF/XML, Loire JWT), plain JSON assets, and XML assets.
+`AssetValidationService` provides on-demand validation of stored assets against registered validators, invoked via the dedicated on-demand validation endpoint defined in the OpenAPI specification.
+It supports RDF assets (JSON-LD, Turtle, N-Triples, RDF/XML, Loire JWT), plain JSON assets, and XML assets.
 
 Validation is delegated to a list of `ValidationStrategy` implementations selected by asset type:
 
@@ -663,22 +671,18 @@ Both paths run the engine in-line on the request thread.
 
 RDF asset content is parsed by `RdfAssetParser`, which unwraps Loire JWTs before parsing and delegates format detection to `CredentialFormatDetector` (JSON-LD, Turtle, N-Triples, RDF/XML). Validation results are persisted via `ValidationResultStore` (see <<_validation_result_storage>>).
 
-Multi-asset requests (`assetIds` with more than one entry) are restricted to SHACL validation: all asset models are merged into a single data graph before evaluation. Single-asset requests dispatch to all applicable enabled strategies. The maximum number of assets per request is controlled by `federated-catalogue.validation.max-assets-per-request` (default: 20).
+Multi-asset requests (more than one asset identifier in the request) are restricted to SHACL validation: all asset models are merged into a single data graph before evaluation.
+Single-asset requests dispatch to all applicable enabled strategies.
+The maximum number of assets per request is operator-configurable; see the wiki configuration guide for the property name and current default.
 
-Validation results are persisted in the `validation_result` table.
-Results carry an `outdated` flag and an `OutdatedReason` that records why a result is no longer current:
-
-[options="header",cols="1,2"]
-|===
-| Reason | Trigger
-| `ASSET_UPDATED` | A new version of the asset was uploaded (`PUT /assets/{id}`)
-| `ASSET_REVOKED` | The asset was revoked (status transition to `REVOKED`)
-|===
+Validation results are persisted in the relational store and carry an outdated flag together with a reason that records why a result is no longer current.
+The two recognised reasons are an asset update (a new asset version has been uploaded) and an asset revocation (the asset has transitioned to the revoked lifecycle state).
 
 **Lifecycle rules:**
 
-* **Asset update / revoke:** All existing results for the asset are bulk-marked `outdated = true` with the appropriate `OutdatedReason`. Results are retained for audit purposes — historical validation state remains queryable.
-* **Asset delete:** All associated results are permanently deleted (`ValidationResultStore.deleteByAssetId`).
+* **Asset update / revoke:** All existing results for the asset are bulk-marked as outdated with the appropriate reason.
+Results are retained for audit purposes — historical validation state remains queryable.
+* **Asset delete:** All associated results are permanently deleted.
 
 ===== Revalidation Service
 
@@ -703,9 +707,9 @@ Blank nodes are handled via Jena's built-in blank-node representation.
 Extracted claims pass through `ProtectedNamespaceFilter.filterClaims()` and the result is a `NonCredentialVerificationResult` — a subclass of `CredentialVerificationResult` with `issuer`, `issuanceDate`, and `credentialId` set to `null` (absent from non-credential RDF documents).
 A payload that contains no triples is rejected with a 400 (`"Non-credential RDF content contains no triples"`).
 
-NOTE: SHACL schema validation is not invoked during upload for non-credential RDF assets, even when `federated-catalogue.verification.schema=true`.
-The non-credential strategy does not call `SchemaValidationService` at all — credential-pipeline concepts (semantic checks, schema validation, signature verification) do not apply.
-On-demand validation against specific SHACL shapes is available via the `POST /assets/validate` endpoint.
+NOTE: SHACL schema validation is not invoked during upload for non-credential RDF assets, even when the upload-time SHACL switch is enabled.
+The non-credential strategy does not call the schema validation service at all — credential-pipeline concepts (semantic checks, schema validation, signature verification) do not apply.
+On-demand validation against specific SHACL shapes is available via the dedicated on-demand validation endpoint (see the OpenAPI specification).
 
 NOTE: Whether an RDF document enters this path depends on MIME type classification by `RdfDetector` (see <<_non_rdf_asset_upload>>) and the `FormatDetector` outcome.
 A Turtle or RDF/XML document without a Gaia-X credential structure classified as `UNKNOWN` by `FormatDetector` triggers this path.
@@ -788,8 +792,8 @@ Detection rules:
 |===
 | Content-Type | Body prefix | Result
 | JWT type (e.g., `application/vc+jwt`) | `eyJ` (JWT) | Accept as JWT
-| JWT type | Not JWT | HTTP 400 (content-type/body mismatch)
-| JSON-LD type (e.g., `application/ld+json`) | `eyJ` (JWT) | HTTP 400 (content-type/body mismatch)
+| JWT type | Not JWT | Reject — content-type/body mismatch
+| JSON-LD type (e.g., `application/ld+json`) | `eyJ` (JWT) | Reject — content-type/body mismatch
 | JSON-LD type | JSON-LD body | Accept as JSON-LD
 | Not provided | `eyJ` (JWT) | Accept as JWT (fallback detection)
 | Not provided | JSON-LD body | Accept as JSON-LD
@@ -860,9 +864,15 @@ The Graph Store is the interface for interacting with the Graph Database. It rec
 
 All consumers depend on a single `GraphStore` bean: `RoutingGraphStore` (marked `@Primary`). It delegates every method to the currently-active adapter, held behind a `volatile` reference. The admin "Switch Backend" action calls a synchronized `setActive(GraphBackendType)` method on the routing store, so subsequent reads observe the new backend immediately without a restart. Each backend adapter (Neo4j, Fuseki) opens its driver lazily on first use; this keeps the application bootable when an inactive backend is unreachable.
 
-A `GraphStoreHealthIndicator` (Spring Boot `HealthIndicator`) reports the graph store status via the `/actuator/health` endpoint. On startup, `GraphStoreStartupChecker` detects when a real backend (Neo4j or Fuseki) is active but contains no claims, and triggers an asynchronous rebuild from the metadata store via `GraphRebuildService`. Administrators can also trigger a rebuild or check its progress through the `GraphAdminController` REST endpoints (`POST /admin/graph/rebuild`, `GET /admin/graph/rebuild/status`, `GET /admin/graph/status`). After an admin backend switch, the same rebuild path repopulates the newly-active store from the metadata store.
+A health indicator reports the graph store status as part of the standard Spring Boot health endpoint.
+On startup, a startup-checker component detects when a real backend (Neo4j or Fuseki) is active but contains no claims, and triggers an asynchronous rebuild from the metadata store.
+Administrators can also trigger a rebuild or check its progress through the graph admin endpoints (see the OpenAPI specification).
+After an admin backend switch, the same rebuild path repopulates the newly-active store from the metadata store.
 
-Triggering a rebuild is **idempotent**. The rebuild re-imports claims from all active credentials into the graph via `addClaims`, which overwrites any existing claims for the same credential subject. Running a rebuild on an already up-to-date graph produces the same end state. If a rebuild is already in progress, the endpoint returns HTTP 409 (Conflict) and no second rebuild is started.
+Triggering a rebuild is **idempotent**.
+The rebuild re-imports claims from all active credentials into the graph, which overwrites any existing claims for the same credential subject.
+Running a rebuild on an already up-to-date graph produces the same end state.
+A rebuild already in progress short-circuits a subsequent rebuild request as a conflict — the OpenAPI specification is authoritative for the error contract.
 
 [source,java]
 ----
@@ -1006,7 +1016,8 @@ classDiagram
     AssetStore ..> IriValidator : uses
 ....
 
-The `AssetStore` provides two parallel access paths: **hash-based** methods (internal, used for content deduplication and file storage) and **IRI-based** methods (public API, introduced by CAT-FR-AM-02). Key IRI-based operations:
+The `AssetStore` provides two parallel access paths: **hash-based** methods (internal, used for content deduplication and file storage) and **IRI-based** methods (public API).
+Key IRI-based operations:
 
 [cols="2,3", options="header"]
 |===
@@ -1021,42 +1032,22 @@ See ADR 7, Hash-Based Mutation Operations Exception. `deleteAsset` publishes an 
 
 The `IriGenerator` assigns IRIs before storage: it extracts IRIs from RDF content (`credentialSubject.id`, `@id`, ontology/shapes/vocabulary IRIs) or generates UUID URNs (RFC 4122) for non-RDF assets and as fallback. The `IriValidator` checks all assigned IRIs against supported formats (DIDs, UUID URNs, generic URNs, HTTP/HTTPS IRIs) — returning `true`/`false`. Callers decide how to handle invalid IRIs (fallback to UUID URN, or reject the request).
 
-The asset metadata is stored in the metadata store, using the following data model:
+Asset metadata is persisted in the relational metadata store.
+Each asset row carries:
 
+* a surrogate technical identifier and a content hash (with uniqueness enforced over the hash);
+* the asset's IRI (the public identifier, see ADR 7) and the issuer;
+* lifecycle state (active / deprecated / expired / revoked / end-of-life) and the timestamps that drive it;
+* file metadata (content type, size, original filename) — these accompany every asset, including credentials, regardless of whether the bytes live in the database or in the File Store;
+* a raw-content column that is nullable: for RDF credentials it holds the JSON-LD body, for non-RDF assets the bytes live only in the File Store;
+* user-attribution columns populated by JPA auditing from the JWT subject in the security context (null for unauthenticated operations and for rows that predate the introduction of attribution).
 
-.ASSET table
-[cols="1,2,1,3", options="header"]
-|===
-| Type | Column | Key | Note
+The exact column shape, datatypes, and constraint names are defined in the Liquibase changelog (the authoritative schema reference); inspect the migration scripts in the source tree rather than restating them here.
 
-| BIGINT | id | PK | Surrogate key, generated by `assets_id_seq` sequence
-| VARCHAR(64) | asset_hash | UQ | Content hash — unique constraint (`uq_assets_asset_hash`)
-| TEXT | subjectid | |
-| TEXT | issuer | |
-| TIMESTAMP | uploadtime | |
-| TIMESTAMP | statustime | |
-| TIMESTAMP | expirationtime | |
-| SMALLINT | status | | Lifecycle status ordinal (0=ACTIVE, 1=DEPRECATED, …)
-| TEXT | content | | nullable — NULL for non-RDF assets
-| VARCHAR[] | validators | |
-| VARCHAR | content_type | | MIME type (e.g. application/pdf)
-| BIGINT | file_size | | asset size in bytes
-| VARCHAR(500) | original_filename | | client-provided filename
-| TEXT | change_comment | | optional change note for this version
-| VARCHAR(255) | created_by | | JWT subject of the user who created the record (null for pre-existing rows)
-| VARCHAR(255) | modified_by | | JWT subject of the user who last modified the record
-| TIMESTAMPTZ | created_at | | Populated by Spring Data JPA `@CreatedDate`; immutable after insert
-| TIMESTAMPTZ | last_modified_at | | Populated by Spring Data JPA `@LastModifiedDate`
-|===
+NOTE: The asset table evolved out of the original Self-Description store: a relational migration renamed the table from its Self-Description-era name to `assets` and demoted the content hash from primary key to a unique constraint, in favour of a surrogate technical identifier.
+The migration history is preserved in the Liquibase changelog and is documented for operators reading historical migrations, but the architecture only depends on the present shape.
 
-.Asset table notes
-****
-. The table was renamed from `sdfiles` to `assets` and the primary key from `sdhash` to `asset_hash` (see Liquibase changeset `2026-03-09-rename-sdfiles-to-assets`). A subsequent migration (`2026-03-25-technical-ids-assets`) introduced a surrogate `BIGINT` primary key (`id`) with a sequence, demoting `asset_hash` to a unique constraint.
-. The `content` column is nullable. For credentials (RDF), it stores the JSON-LD in the database. For non-RDF assets, content is stored only in the File Store and the database column remains `NULL`. The three asset metadata columns (`content_type`, `file_size`, `original_filename`) are backfilled with `content_type = 'application/ld+json'` for existing records.
-. The `subjectid` column stores the asset's IRI (see ADR 7) — for RDF assets this is the extracted `credentialSubject.id` or equivalent; for non-RDF assets this is a UUID URN generated by `IriGenerator`.
-. The table is audited by Hibernate Envers — all insert, update, and delete operations are tracked in the `assets_aud` shadow table (see <<_audit_history>>).
-. The `created_by` and `modified_by` columns are populated by Spring Data JPA auditing via `SecurityAuditorAware`, which reads the JWT subject from the security context. They are null for unauthenticated operations and for rows that predate CAT-FR-LM-03.
-****
+Audit-trail integration is documented under <<_audit_history,Audit History>>.
 
 [[_validation_result_storage]]
 ==== Validation Result Storage
@@ -1094,33 +1085,20 @@ classDiagram
     ValidationResultStore ..> ValidationResultGraphWriter : delegates graph write
 ....
 
-.VALIDATION_RESULT table
-[cols="1,2,1,3", options="header"]
-|===
-| Type | Column | Key | Note
+Each validation-result record carries:
 
-| BIGINT | id | PK | Surrogate key, sequence-generated (allocation size 50)
-| TEXT[] | asset_ids | | Asset subject IRI(s) — GIN indexed for efficient `= ANY()` lookups
-| TEXT[] | validator_ids | | Validator IDs (schema IRIs or trust framework IDs) used in this run
-| VARCHAR(64) | validator_type | | `SHACL`, `JSON_SCHEMA`, `XML_SCHEMA`, or `TRUST_FRAMEWORK`
-| BOOLEAN | conforms | | True if validation passed; false if violations were found
-| TIMESTAMPTZ | validated_at | | Timestamp of the validation run (caller-supplied, not DB insertion time)
-| TEXT | report | | Serialised validation report; null for passing validations
-| VARCHAR(64) | content_hash | | SHA-256 hex digest over canonical JSON of core fields — tamper detection
-| VARCHAR(16) | graph_sync_status | | `SYNCED` or `FAILED` — set atomically when the record is first stored
-| TIMESTAMPTZ | created_at | | DB insertion time, populated by Spring Data JPA `@CreatedDate`
-|===
+* the list of asset IRIs the run covered and the list of validator identifiers that produced the result;
+* the validator family (SHACL, JSON Schema, XML Schema, or trust-framework compliance);
+* a conformance flag and, on failure, the serialised validation report;
+* the validation timestamp (caller-supplied, distinguishing the validation event from the row's insertion time);
+* a content hash over the core fields to support tamper detection;
+* a graph-projection status indicating whether the row was successfully mirrored into the graph store as `fcmeta:` triples on first store.
 
-The two REST endpoints for validation result retrieval are:
+The IRI column is indexed for efficient lookup by asset identifier.
+The OpenAPI specification is authoritative for the REST endpoints (paginated retrieval per asset, and single-record retrieval by surrogate identifier).
 
-[cols="2,3", options="header"]
-|===
-| Endpoint | Description
-| `GET /assets/{id}/validations` | Paginated list of `StoredValidationResult` for the asset identified by IRI `{id}`. Returns 200 with an empty list if the asset exists but has no stored validations; 404 if the asset does not exist.
-| `GET /validations/{id}` | Single `StoredValidationResult` by its surrogate database ID. Returns 404 if not found.
-|===
-
-After a graph backend reset, `GraphRebuilder.rebuildValidationResults()` re-projects all validation result records as `fcmeta:` triples from PostgreSQL, restoring graph state without re-running verification. Each record is updated to `SYNCED` on success or `FAILED` if the graph write fails.
+After a graph backend reset, the rebuilder re-projects all validation result records as `fcmeta:` triples from the relational store, restoring graph state without re-running verification.
+Rows whose projection succeeds are marked synced; rows whose projection fails are marked accordingly for retry.
 
 **Asset deletion cascade:** When an asset is deleted, `AssetStoreImpl` publishes an `AssetDeletedEvent`.
 Two `@TransactionalEventListener(BEFORE_COMMIT)` consumers run inside the same transaction as the asset deletion:
@@ -1259,46 +1237,19 @@ public interface SchemaStore {
 }
 ----
 
-Schema versioning is implemented via Hibernate Envers (see <<_audit_history>>). Every `PUT /schemas/{id}` call triggers a JPA `save()`, causing Envers to append a snapshot to `schemafiles_aud`. The `SchemaAuditRepository` component (DAO layer) encapsulates all Envers API calls (`AuditReaderFactory`, `AuditEntity` queries), keeping Envers types out of `SchemaJpaDao`. Versions exposed through the API are 1-based positional ordinals computed over per-schema revisions in ascending order.
+Schema versioning is implemented via Hibernate Envers (see <<_audit_history>>).
+Each schema replace operation triggers a JPA save, causing Envers to append a revision snapshot to the schema audit shadow.
+The audit-repository DAO encapsulates all Envers API calls so that the persistence layer for the main schema entity remains free of Envers types.
+Versions exposed through the API are 1-based positional ordinals computed over per-schema revisions in ascending order.
 
-The schema metadata is stored in the metadata store, using the following data model:
+The schema metadata is persisted in the relational metadata store and conceptually comprises:
 
-[mermaid, width=2000]
-....
-erDiagram
-    SCHEMAFILE {
-        BIGINT id PK
-        VARCHAR schemaid UK
-        VARCHAR namehash
-        TIMESTAMP created_at
-        TIMESTAMP modified_at
-        VARCHAR created_by
-        VARCHAR modified_by
-        VARCHAR type
-        TEXT content
-    }
+* a schema-file entity carrying the schema identifier (the unique business key), the schema type (one of *ontology*, *shape*, *vocabulary*), the raw schema content, and the same audit-attribution columns as the asset entity;
+* a schema-term entity holding the set of terms (classes, properties, vocabulary entries) declared by each schema, with global uniqueness across all schema files;
+* a revalidator-chunk entity used by the background re-validation worker (see <<_revalidation_service>>) to checkpoint its progress.
 
-    SCHEMATERM {
-        BIGINT id PK
-        VARCHAR term
-        BIGINT schema_file_id FK
-    }
-
-    REVALIDATORCHUNK {
-        INTEGER chunkid PK
-        TIMESTAMP lastcheck
-    }
-
-    SCHEMAFILE ||--o{ SCHEMATERM : defines
-....
-
-.Schema table notes
-****
-. `schemaid` is the unique business key (natural identifier, enforced by a DB unique constraint).
-. `type` valid values: `ONTOLOGY`, `SHAPE`, `VOCABULARY`.
-. `term` is globally unique across all schema files (enforced by a DB unique constraint).
-. `SCHEMAFILE.id` uses sequence `schemafiles_id_seq`; `SCHEMATERM.id` uses `schematerms_id_seq`.
-****
+The relationships are one schema-file to many schema-terms; the chunk entity is independent.
+As before, the authoritative column shape lives in the Liquibase changelog.
 
 ==== Validator Cache
 
@@ -1346,109 +1297,42 @@ public interface ValidatorCache {
 
 ----
 
-The Validator Cache is stored in the metadata store, using the following data model:
-
-[mermaid, width=2000]
-....
-erDiagram
-    VALIDATORCACHE {
-        VARCHAR diduri
-        CLOB publickey
-        TIMESTAMP expirationtime
-    }
-
-....
+The validator cache is persisted in the relational metadata store as a single entity keyed by the validator's DID URI, holding the cached public key and the expiration timestamp at which the cache entry must be refreshed.
 
 [[_audit_history]]
 ==== Audit History (Hibernate Envers)
 
-The catalogue uses Hibernate Enversfootnote:[https://hibernate.org/orm/envers/[Hibernate Envers — Entity Auditing]] to maintain an audit trail for assets and schemas. Every insert, update, and delete on an audited entity is recorded in a corresponding `_aud` shadow table, linked to a global revision in the `REVINFO` table.
+The catalogue uses Hibernate Enversfootnote:[https://hibernate.org/orm/envers/[Hibernate Envers — Entity Auditing]] to maintain an audit trail for assets and schemas.
+Every insert, update, and delete on an audited entity is recorded in a corresponding shadow table, linked to a global revision entity that timestamps each operation.
 
-Audited entities: `Asset` (`assets`), `SchemaFile` (`schemafiles`), `SchemaTerm` (`schematerms`).
-
-[mermaid, width=2000]
+[mermaid]
 ....
 erDiagram
-    REVINFO {
-        INTEGER rev PK
-        BIGINT revtstmp
-    }
-
-    ASSETS_AUD {
-        BIGINT id PK
-        INTEGER rev FK "composite PK with id"
-        SMALLINT revtype
-        VARCHAR asset_hash
-        TEXT subjectid
-        TEXT issuer
-        TIMESTAMP uploadtime
-        TIMESTAMP statustime
-        TIMESTAMP expirationtime
-        SMALLINT status
-        TEXT content
-        VARCHAR content_type
-        BIGINT file_size
-        VARCHAR original_filename
-        TEXT change_comment
-        VARCHAR created_by
-        VARCHAR modified_by
-        TIMESTAMPTZ created_at
-        TIMESTAMPTZ last_modified_at
-    }
-
-    SCHEMAFILES_AUD {
-        BIGINT id PK
-        INTEGER rev FK "composite PK with id"
-        SMALLINT revtype
-        VARCHAR schemaid
-        VARCHAR namehash
-        TIMESTAMP created_at
-        TIMESTAMP modified_at
-        VARCHAR created_by
-        VARCHAR modified_by
-        VARCHAR type
-        TEXT content
-    }
-
-    SCHEMATERMS_AUD {
-        BIGINT id PK
-        INTEGER rev FK "composite PK with id"
-        SMALLINT revtype
-        VARCHAR term
-        BIGINT schema_file_id
-    }
-
-    REVINFO ||--o{ ASSETS_AUD : tracks
-    REVINFO ||--o{ SCHEMAFILES_AUD : tracks
-    REVINFO ||--o{ SCHEMATERMS_AUD : tracks
+    Revision ||--o{ AssetSnapshot : "tracks"
+    Revision ||--o{ SchemaSnapshot : "tracks"
+    Revision ||--o{ SchemaTermSnapshot : "tracks"
 ....
 
-.Audit table notes
-****
-. Each `_aud` table mirrors the columns of its source table plus `rev` (FK to REVINFO) and `revtype` (0=INSERT, 1=UPDATE, 2=DELETE). The composite primary key is `(id, rev)`.
-. Audit tables are managed by Liquibase (changeset `2026-03-25-envers-*`), not by Hibernate's `hbm2ddl` auto-generation.
-. The `created_by` and `modified_by` columns in `assets_aud` and `schemafiles_aud` are populated by `SecurityAuditorAware`, which reads the JWT subject from the Spring Security context. They are null for unauthenticated or background operations, and for rows that predate CAT-FR-LM-03.
-. Known limitation: bulk JPQL `DELETE` or `UPDATE` statements bypass Envers because they do not trigger JPA entity lifecycle events. All current DAO code uses entity-level operations, so this limitation does not apply in practice.
-. `REVINFO.rev` uses sequence `revinfo_seq`. `revtstmp` is a Unix epoch timestamp in milliseconds.
-. `revtype` encodes the operation: 0=INSERT, 1=UPDATE, 2=DELETE.
-****
+Audited entities are the asset, the schema file, and the schema term.
+Each shadow row mirrors its source row, plus a reference to the revision and a flag indicating whether the operation was an insert, update, or delete.
+User-attribution columns on the shadow rows are populated from the JWT subject in the security context — null for unauthenticated or background operations and for rows that predate the introduction of attribution.
+
+NOTE: Bulk JPA-Query `DELETE` or `UPDATE` statements bypass Envers because they do not trigger entity lifecycle events; the catalogue therefore restricts itself to entity-level operations for audited entities.
+The exact shadow-table schema and the migrations that introduced it are defined in the Liquibase changelog.
 
 [[_verification_profiles]]
 ==== Verification Profiles
 
-The verification pipeline has four independently configurable stages. Each stage is controlled by a dedicated configuration property:
+The verification pipeline has four independently configurable stages, each toggled by a dedicated boot-time configuration switch:
 
-[options="header",cols="2,1,3"]
-|===
-| Property | Default | Description
-| `federated-catalogue.verification.semantics` | `true` | Validate credential subject `@type` against loaded ontologies
-| `federated-catalogue.verification.schema` | `false` | Validate against SHACL shapes (composite schema)
-| `federated-catalogue.verification.vp-signature` | `false` | Verify Verifiable Presentation proof (JWS)
-| `federated-catalogue.verification.vc-signature` | `false` | Verify Verifiable Credential proof (JWS)
-| `federated-catalogue.verification.trust-framework.gaiax.enabled` | `false` | Enforce Gaia-X Trust Framework compliance (trust anchor chain)
-| `federated-catalogue.verification.trust-framework.gaiax.trust-anchor-url` | _(Gaia-X registry URL)_ | URL for the Gaia-X Trust Anchor Registry (only used when enabled)
-| `federated-catalogue.verification.signature-verifier` | `uni-res` | DID resolution strategy: `local` (resolve did:web directly) or `uni-res` (Universal Resolver)
-|===
+* **Semantic validation** — checks that the credential subject's `@type` resolves against the loaded ontologies.
+* **Schema validation** — runs the credential through the composite SHACL shape graph.
+* **Verifiable Presentation signature verification** — checks the outer-envelope JWS.
+* **Verifiable Credential signature verification** — checks each inner credential's signature.
+
+A separate trust-framework toggle controls whether Gaia-X Trust Framework compliance (trust-anchor chain validation) is enforced once signatures have been verified.
+The address of the Trust Anchor Registry that this enforcement consults is carried in the relevant bundle descriptor; a DID-resolution strategy switch selects between the bundled local resolver and a remote Universal Resolver.
+The wiki https://github.com/eclipse-xfsc/federated-catalogue/wiki/Installation-%26-Configuration-Guide[Installation & Configuration Guide] documents the exact property names, environment-variable forms, and current defaults.
 
 Two deployment profiles are pre-configured. Operators may also define custom combinations.
 
@@ -1563,7 +1447,10 @@ flowchart TB
     style EXT fill:#e3f2fd,stroke:#42a5f5
 ....
 
-NOTE: The `Schema validation enabled?` branch combines two gates. The caller's `verifySchema` request parameter selects whether SHACL runs at all; the administrative SHACL module toggle (see ADR 16) then gates that branch independently. When `verifySchema=true` and SHACL is administratively disabled, the request short-circuits with `400 Bad Request` body `module_disabled:SHACL` before reaching the SHACL composite. The same pattern applies on the on-demand validation endpoint via `AssetValidationServiceImpl`.
+NOTE: The "schema validation enabled?" branch combines two gates.
+The caller's per-request `verifySchema` flag selects whether SHACL runs at all; the administrative SHACL module toggle (see ADR 16) then gates that branch independently.
+With both gates pointing in opposite directions (caller asks for SHACL but the module is administratively disabled), the request short-circuits with a `module_disabled:SHACL` error before reaching the SHACL composite.
+The same pattern applies on the on-demand validation endpoint.
 
 ===== Docker Compose configuration
 
@@ -1581,13 +1468,13 @@ docker compose -f docker-compose.yml -f docker-compose.strict.yml --env-file dev
 [[_non_rdf_asset_upload]]
 ==== Non-RDF Asset Upload
 
-The catalogue supports uploading non-RDF content (PDFs, plain JSON, YAML, images, binary files) through the same `POST /assets` endpoint, extended to accept `multipart/form-data` and `application/octet-stream` content types.
+The catalogue supports uploading non-RDF content (PDFs, plain JSON, YAML, images, binary files) through the existing asset-upload endpoint, extended to accept multipart and opaque-byte-stream content types.
 
 ===== RDF Detection
 
 The `RdfDetector` component classifies uploaded content as RDF or non-RDF using two checks:
 
-1. **MIME type allowlist:** The content type is matched against a configurable set (`federated-catalogue.rdf.content-types`).
+1. **MIME type allowlist:** The content type is matched against the operator-configurable RDF MIME-type allowlist.
 The default allowlist includes both credential formats (JSON-LD, JWT) and non-credential RDF serializations (Turtle, N-Triples, RDF/XML).
 Non-credential RDF formats support claim extraction only — they do not enter the credential verification pipeline and SHACL schema validation is not invoked for them.
 2. **Content inspection (for `application/json` only):** A regex pattern checks whether `"@context"` appears as a JSON key with a plausible JSON-LD value (array, string, or URL). Plain JSON without `@context` is classified as non-RDF.
@@ -1616,14 +1503,15 @@ flowchart TD
 For non-RDF assets:
 
 * No verification, no graph interaction
-* Content stored in `assetFileStore` (raw bytes)
-* IRI assigned by `IriGenerator`: UUID URN (`urn:uuid:...`) per RFC 4122
-* Duplicate content rejected with HTTP 409 (Conflict), with existing IRI in the error response
+* Content stored in the asset File Store (raw bytes)
+* IRI assigned by `IriGenerator`: UUID URN per RFC 4122
+* Duplicate content is rejected with the existing IRI returned in the error response (see the OpenAPI specification for the exact error contract)
 
 [[_iri_assignment]]
 ===== IRI Assignment
 
-The `IriGenerator` component assigns an IRI to each asset before storage (CAT-FR-AM-02). The strategy depends on asset type:
+The `IriGenerator` component assigns an IRI to each asset before storage.
+The strategy depends on asset type:
 
 [options="header",cols="1,2,2"]
 |===
@@ -1648,12 +1536,14 @@ Invalid IRIs (null, blank, or syntactically malformed) are rejected before stora
 
 ===== Asset Upload Configuration
 
-[options="header",cols="2,1,3"]
-|===
-| Property | Default | Description
-| `federated-catalogue.rdf.content-types` | `[application/ld+json, application/vc+ld+json, application/vp+ld+json, application/vc+jwt, application/vp+jwt, text/turtle, application/n-triples, application/rdf+xml]` | MIME types classified as RDF by `RdfDetector`. Credential types (`vc+ld+json`, `vc+jwt`, etc.) enter the full verification pipeline. Non-credential RDF serializations (Turtle, N-Triples, RDF/XML) support claim extraction only. SHACL schema validation is not invoked at upload — even when `federated-catalogue.verification.schema=true` — because the `UNKNOWN` format path bypasses the validation step. On-demand validation is available via `POST /assets/validate`.
-| `federated-catalogue.file-store.asset.location` | _(required in production)_ | File system directory for non-RDF asset content
-|===
+Two boot-time configuration concerns are relevant to the upload pipeline:
+
+* The **RDF MIME-type allowlist** determines which content types the catalogue classifies as RDF.
+Credential MIME types (`application/vc+ld+json`, `application/vc+jwt`, and the presentation variants) enter the full verification pipeline; non-credential RDF serializations (Turtle, N-Triples, RDF/XML) enter the claim-extraction-only path.
+Operators may extend or restrict this list to match their deployment's verification capabilities.
+* The **non-RDF asset File Store location** must be configured in production deployments; the application fails to start if it is missing.
+
+Both properties are documented in the wiki configuration guide.
 
 [[_asset_link_service]]
 ==== Asset Link Service
@@ -1661,13 +1551,10 @@ Invalid IRIs (null, blank, or syntactically malformed) are rejected before stora
 The Asset Link Service manages bidirectional links between machine-readable (RDF) assets and
 human-readable representations (e.g., PDF, DOCX, HTML, plain text).
 
-Links are created via `POST /assets/{mrId}/human-readable` (201 Created; 409 Conflict if an HR
-asset is already linked) and replaced via `PUT /assets/{mrId}/human-readable` (200 OK; 404 Not
-Found if no HR asset is linked yet). Content retrieval is exposed via
-`GET /assets/{mrId}/human-readable` (returns the HR asset bytes) and
-`GET /assets/{hrId}/machine-readable` (returns the MR asset bytes). The linked asset IRI is
-surfaced in the metadata response as `humanReadableId` (on MR assets) and `machineReadableId`
-(on HR assets).
+The endpoint exposes a *create* operation (rejected if the machine-readable asset is already linked) and a *replace* operation (rejected if no human-readable asset is linked yet).
+Two content-retrieval endpoints serve the linked counterpart from either direction.
+The linked asset IRI is surfaced in each side's metadata response under fields that identify the counterpart asset.
+The OpenAPI specification is authoritative for the exact paths, request bodies, and error contracts.
 
 Accepted content types for human-readable representations:
 
@@ -1680,69 +1567,47 @@ Accepted content types for human-readable representations:
 | `text/plain` | Plain text
 |===
 
-These are the default values of `federated-catalogue.assets.human-readable-content-types`.
-The same allowlist is enforced for both `POST /assets/{mrId}/human-readable` and
-`PUT /assets/{mrId}/human-readable`.
+The allowlist is operator-configurable and is enforced for both the create and replace operations on the human-readable link endpoint.
 
-* `application/pdf` and `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
-  cover the main document formats typically exchanged as human-facing attachments.
-* `text/html` supports web-renderable human-readable pages.
-* `text/plain` supports lightweight textual explanations, notes, or readme-style content.
-* Validation is strict against the configured `Content-Type` header. Unsupported types are
-  rejected with `400 Bad Request`.
-* A missing `Content-Type` is treated as `application/octet-stream`, which is not accepted by
-  default and is therefore rejected as well.
+* PDF and DOCX cover the main document formats typically exchanged as human-facing attachments.
+* HTML supports web-renderable human-readable pages.
+* Plain text supports lightweight textual explanations, notes, or readme-style content.
+* Validation is strict against the request's `Content-Type` header.
+Unsupported types are rejected.
+* A missing `Content-Type` is treated as opaque octet-stream content, which is not accepted by default and is therefore rejected as well.
 
-This restriction is intentional: the human-readable link endpoint is meant for documents that a
-person can read directly. Generic binary files can still be uploaded as regular assets, but they
-are not accepted as human-readable representations unless their MIME type is explicitly allowed.
+This restriction is intentional: the human-readable link endpoint is meant for documents that a person can read directly.
+Generic binary files can still be uploaded as regular assets, but they are not accepted as human-readable representations unless their MIME type is explicitly allowed.
 
-Link metadata is stored directly on the `assets` table via two columns added by Liquibase
-changeset `012-asset-links.xml`:
-
-[mermaid, width=2000]
-....
-erDiagram
-    ASSETS {
-        BIGINT id PK
-        VARCHAR asset_type "MACHINE_READABLE | HUMAN_READABLE"
-        BIGINT linked_asset_id FK "→ assets.id ON DELETE SET NULL"
-    }
-....
-
-.Asset link columns notes
-****
-. `asset_type VARCHAR(50)` — nullable; values: `MACHINE_READABLE`, `HUMAN_READABLE`, `GENERIC`. Identifies which variant this asset represents.
-. `linked_asset_id BIGINT` — nullable FK referencing `assets.id`. `ON DELETE SET NULL` ensures that deleting the referenced asset clears the pointer without a hard cascade.
-. Unique index `idx_assets_linked_asset_id` on `linked_asset_id` enforces a strict 1:1 relationship — each HR asset can be linked to at most one MR asset and vice versa.
-. Audited automatically by Hibernate Envers via the `assets_aud` shadow table — no separate audit columns on `assets` itself.
-****
+Link metadata is stored directly on the asset entity.
+Each asset row carries an asset-type discriminator (one of *machine-readable*, *human-readable*, or *generic*) and an optional foreign-key reference to the linked counterpart asset.
+The relationship is enforced as strictly 1:1 (each human-readable asset can be linked to at most one machine-readable asset and vice versa).
+Deletion of one side clears the pointer on the other side rather than cascade-deleting.
+Link changes are captured by the existing asset audit shadow — no separate audit columns or tables are introduced.
 
 Corresponding RDF triples (`fcmeta:hasHumanReadable`, `fcmeta:hasMachineReadable`) are written to
 the graph DB as supplementary metadata. Graph writes are non-fatal: a failure is logged but does
 not roll back the PostgreSQL transaction.
 
-**Cascade delete:** Deleting an MR asset also deletes its linked HR asset (application-level cascade
-in `AssetStoreImpl`). The `ON DELETE SET NULL` FK constraint prevents orphan pointer errors at the
-database level when the HR asset row is removed.
+**Cascade delete:** Deleting a machine-readable asset also deletes its linked human-readable counterpart (an application-level cascade in the asset store).
+The relational integrity is preserved by a foreign-key constraint that clears the pointer rather than cascade-deleting at the database level when one side is removed.
 
-**Graph rebuild:** `POST /admin/graph/rebuild` restores `fcmeta:hasHumanReadable` and
-`fcmeta:hasMachineReadable` triples from the `linked_asset_id` column in the `assets` table.
+**Graph rebuild:** Triggering an admin graph rebuild restores the `fcmeta:hasHumanReadable` and `fcmeta:hasMachineReadable` triples from the persisted link references in the metadata store.
 
 [[_admin_api]]
 ==== Admin API
 
-The Admin API exposes runtime configuration and observability endpoints for catalogue administrators. All `/admin/**` endpoints require the `ADMIN_ALL` permission (see <<_authorization>>).
+The Admin API exposes runtime configuration and observability endpoints for catalogue administrators.
+All admin endpoints require the admin permission (see <<_authorization>>).
+The OpenAPI specification is authoritative for the endpoint paths, request bodies, and error contracts; the table below identifies the services in functional terms.
 
-Five delegate services in `fc-service-server` implement the admin endpoints, each corresponding to a section of the Admin UI:
-
-[options="header",cols="1,2,2"]
+[options="header",cols="1,3"]
 |===
-| Service | Implements | Endpoints
-| `AdminDashboardService` | `AdminApiDelegate` | `GET /admin/me` (access check), `GET /admin/stats` (metrics), `GET /admin/health` (component health), `GET /admin/keycloak-url`
-| `TrustFrameworkAdminService` | `TrustFrameworkAdminApiDelegate` | List, toggle, and update trust frameworks; checks live connectivity per framework on list
-| `SchemaValidationAdminService` | `SchemaValidationAdminApiDelegate` | List schema modules (SHACL, JSON Schema, XML Schema, OWL) with toggle and schema counts; toggle each module on/off; expose the per-ontology subclass contribution to each registered base class for the OWL module. SHACL, JSON Schema, and XML Schema toggles are enforced by on-demand validation (`POST /assets/validate`) via `AssetValidationService` and return `400 module_disabled:<MODULE>` when off; in upload verification only SHACL is consulted, with the same error contract. The OWL toggle gates the runtime composite-ontology subclass walk in `CredentialVerificationStrategy.resolveBaseClass` (see ADR 16)
-| `GraphDatabaseAdminService` | `GraphDatabaseAdminApiDelegate` | `GET /admin/graph-database` returns the active backend, connection state, claim count, and a `rebuildNeeded` flag with the `rdfAssetCount` that a rebuild would re-index. `POST /admin/graph-database/switch` pre-flights the target backend via `GraphStoreProbe` (Bolt for Neo4j, HTTP for Fuseki, 3 s budget each), performs the live in-process swap via `RoutingGraphStore.setActive(...)`, and only on a successful swap persists the choice to `admin_config[graphstore.preferred.backend]` — so a failed swap cannot strand a stale preference for the next cold boot. The change is observable on the next call with no JVM restart. Unreachable targets and backends with no registered adapter are both rejected with `400 Bad Request` before any state change.
+| Service | Responsibility
+| `AdminDashboardService` | Access check, metrics, component health, and discovery of the operator-facing Keycloak Admin Console URL.
+| `TrustFrameworkAdminService` | List, toggle, and update trust frameworks; checks live connectivity per framework on list.
+| `SchemaValidationAdminService` | Lists the four schema modules (SHACL, JSON Schema, XML Schema, OWL) with toggle state and schema counts, toggles each module on or off, and exposes the per-ontology subclass-contribution map for the OWL module. The three validator toggles are enforced both on the on-demand validation path and on the credential-upload schema-validation path; the OWL toggle gates the third tier of base-class resolution (see ADR 16).
+| `GraphDatabaseAdminService` | Reports the active backend, its connection state, claim count, and whether a rebuild is needed. A switch operation pre-flights the target backend (Bolt for Neo4j, HTTP for Fuseki, with a small per-probe budget), performs the live in-process swap, and only on a successful swap persists the new preference so a failed swap cannot strand a stale preference for the next cold boot. The change is observable on the next call with no JVM restart. Unreachable targets and backends with no registered adapter are rejected before any state change.
 |===
 
 These components in `fc-service-core` read admin-controlled settings during normal catalogue operations:
@@ -1750,22 +1615,27 @@ These components in `fc-service-core` read admin-controlled settings during norm
 [options="header",cols="1,1,2"]
 |===
 | Component | Triggered by | Effect of admin configuration
-| `LoirePolicyEnforcer` | Loire envelope processing (per request, via `LoireCredentialProcessor`) | Consults `TrustFrameworkService.isEnabled("gaia-x")` to decide whether Loire-specific policies (issuer `did:web` restriction, trust-chain validation) apply at all; reads `trust_anchor_url` from the bundle's `properties` for `x5u` trust-chain validation
-| `AssetValidationServiceImpl` | On-demand asset validation (`POST /assets/validate`) | Checks module state via `SchemaModuleConfigService` for `SHACL`, `JSON_SCHEMA`, and `XML_SCHEMA`. If a module is disabled, the request is rejected with `ClientException` → `400 Bad Request`, body `module_disabled:<MODULE>` (see ADR 16).
-| `CredentialVerificationStrategy` | Credential verification | Reads SHACL and OWL module state via `SchemaModuleConfigService` (cached with `@Cacheable` — hot path). Disabling SHACL returns the same `400 module_disabled:SHACL` contract on requests with `verifySchema=true`. Disabling OWL bypasses the runtime composite-ontology subclass walk in `resolveBaseClass`; credentials whose type is only reachable through that walk fall through to `ResolvedBaseClass.UNKNOWN` and are rejected by the verification entry point with `400 Bad Request` (see ADR 16). JSON Schema and XML Schema toggles do not bite on this path today — every credential is JSON-LD or JWT-wrapped JSON-LD and routes to SHACL. The Gaia-X enabled flag is consulted via `TrustFrameworkService`.
+| `LoirePolicyEnforcer` | Loire envelope processing (per request, via `LoireCredentialProcessor`) | Consults the trust-framework service to decide whether Loire-specific policies (issuer DID-method restriction, trust-chain validation) apply at all; reads the trust-anchor URL from the active bundle's effective configuration for `x5u` trust-chain validation
+| `AssetValidationServiceImpl` | On-demand asset validation | Checks module state for SHACL, JSON Schema, and XML Schema. If a module is disabled, the request is rejected with a `module_disabled:<MODULE>` error (see ADR 16); the OpenAPI specification carries the exact error contract.
+| `CredentialVerificationStrategy` | Credential verification | Reads SHACL and OWL module state (cached on the hot path). Disabling SHACL surfaces the same `module_disabled:SHACL` contract on requests that asked for schema validation. Disabling OWL bypasses the runtime composite-ontology subclass walk; credentials whose type is only reachable through that walk are rejected at the verification entry point (see ADR 16). JSON Schema and XML Schema toggles do not bite on this path today — every credential is JSON-LD or JWT-wrapped JSON-LD and routes to SHACL.
 |===
 
-The `trust_frameworks` and `admin_config` tables that back this configuration layer are documented under <<section-concepts,Cross-cutting Concepts — Admin Configuration Persistence>>.
+The persistence shape of this configuration layer is documented under <<section-concepts,Cross-cutting Concepts — Admin Configuration Persistence>>.
 
 ===== Schema-module admin toggles
 
-The admin schema-modules page (proxied from the demo portal to `GET /admin/schema-validation` on the catalogue) lists four toggleable modules — SHACL, JSON Schema, XML Schema, OWL — and surfaces an additional read-only endpoint, `GET /admin/schema-validation/ontologies`, backed by `OntologyImpactService`.
+The admin schema-modules page lists four toggleable modules — SHACL, JSON Schema, XML Schema, OWL — and surfaces an additional read-only endpoint for the per-ontology subclass-contribution map, backed by the ontology-impact service.
 
 The four toggles fall into two semantic classes (ADR 16):
 
-* **Validators (SHACL, JSON Schema, XML Schema)** gate the corresponding validator wherever the catalogue would otherwise run it (on-demand validation, and credential verification with `verifySchema=true`). When off, the affected request returns `400 Bad Request` body `module_disabled:<MODULE>`. Stored schemas remain queryable regardless of toggle state.
+* **Validators (SHACL, JSON Schema, XML Schema)** gate the corresponding validator wherever the catalogue would otherwise run it (on-demand validation, and credential verification when the caller asks for schema validation).
+When off, the affected request is rejected with a `module_disabled:<MODULE>` error.
+Stored schemas remain queryable regardless of toggle state.
 
-* **OWL** gates the third tier of base-class resolution. When off, the runtime composite-ontology subclass walk in `CredentialVerificationStrategy.resolveBaseClass` is skipped; only the registry index and `additional_roots` (ADR 10) are consulted. Credentials whose type is only reachable through the subclass walk fall through to `ResolvedBaseClass.UNKNOWN` and are rejected by the verification entry point with `400 Bad Request`. Registry-direct types are unaffected.
+* **OWL** gates the third tier of base-class resolution.
+When off, the runtime composite-ontology subclass walk is skipped; only the registry index and the bundle's additional-roots declarations (ADR 10) are consulted.
+Credentials whose type is only reachable through the subclass walk fail base-class resolution and are rejected at the verification entry point.
+Registry-direct types are unaffected.
 
 `OntologyImpactService` parses each `ONTOLOGY`-type schema row with Jena and counts the `rdfs:subClassOf+` descendants reachable from each registered role's root URI (plus any `additional_roots`), aggregated across active trust-framework bundles. The result is a read-only map of *(ontology id, role name) → subclass count* so operators can see what the OWL toggle is gating before flipping it off.
 
@@ -1827,20 +1697,20 @@ The unified terminology mirrors the unified ingest interface; it does **not** im
 **Schema validation is a separate concept.**
 Schema validation against stored SHACL shapes is available through two independent flows, and neither is what produces a `*VerificationResult`:
 
-* **At upload time**, when `federated-catalogue.verification.schema=true` (off by default), the **credential** upload path additionally invokes `SchemaValidationService` after the VC pipeline.
-A failure aborts the upload with a verification exception — the report is surfaced through the HTTP error, not through `CredentialVerificationResult`.
-For non-credential RDF the upload path currently does not invoke `SchemaValidationService` regardless of this flag (see the NOTE under <<_non_credential_rdf_extraction>>).
-* **On demand**, `POST /assets/validate` (handled by `AssetValidationService`; see <<_on_demand_asset_validation>>) validates any stored asset — credentials, non-credential RDF, plain JSON, XML — against the applicable schemas and persists a `ValidationResult` row carrying the report and an `outdated` flag.
+* **At upload time**, when the upload-time SHACL switch is enabled (off by default), the **credential** upload path additionally invokes the schema-validation service after the VC pipeline.
+A failure aborts the upload with a verification exception — the report is surfaced through the HTTP error, not through the verification result.
+For non-credential RDF the upload path currently does not invoke schema validation regardless of this flag (see the NOTE under <<_non_credential_rdf_extraction>>).
+* **On demand**, the dedicated on-demand validation endpoint (handled by `AssetValidationService`; see <<_on_demand_asset_validation>>) validates any stored asset — credentials, non-credential RDF, plain JSON, XML — against the applicable schemas and persists a validation-result row carrying the report and an outdated flag.
 
 The two flows are orthogonal to ingest-time verification:
 
 [options="header",cols="1,2,2"]
 |===
-| Aspect | Ingest-time verification (`/assets` upload, `/verification`) | On-demand validation (`/assets/validate`)
+| Aspect | Ingest-time verification (asset upload, verification endpoint) | On-demand validation (validation endpoint)
 | Applies to | Credentials → full VC pipeline; non-credential RDF → triple extraction only | Any stored asset — credentials, non-credential RDF, plain JSON, XML
 | Owned by | `VerificationServiceImpl` → `RdfIngestionStrategy` | `AssetValidationService` → `ValidationStrategy` chain
-| Schema validation | Optional, gated by `federated-catalogue.verification.schema` (default off). When enabled it runs as part of the credential upload path; failures abort the upload via exception. Currently not wired for non-credential RDF uploads. | Always available, dispatched by asset type (SHACL / JSON Schema / XML Schema)
-| Result type | `CredentialVerificationResult` or `NonCredentialVerificationResult` (carries claims, role, validators, warnings — but not a schema report) | `ValidationResult` (persisted, with `outdated` flag and full conformance report)
+| Schema validation | Optional, gated by the operator-controlled upload-time SHACL switch (default off). When enabled it runs as part of the credential upload path; failures abort the upload via exception. Not wired for non-credential RDF uploads. | Always available, dispatched by asset type (SHACL / JSON Schema / XML Schema)
+| Result type | `CredentialVerificationResult` or `NonCredentialVerificationResult` (carries claims, role, validators, warnings — but not a schema report) | `ValidationResult` (persisted, with an outdated flag and full conformance report)
 |===
 
 So the name `NonCredentialVerificationResult` does not exclude schema validation as a concept for non-credential assets — it only says: "this is the output of the ingest path, on a payload that is not a credential, therefore the VC-specific fields are null".

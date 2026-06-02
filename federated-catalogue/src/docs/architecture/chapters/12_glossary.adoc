@@ -15,6 +15,9 @@ ifndef::imagesdir[:imagesdir: ../../images]
 |===
 |Term |Definition
 
+|GXFS (Gaia-X Federation Services)
+|A 2021–2024 funded programme (https://gxfs.eu/) that produced the original reference implementations of the Gaia-X Federation Services, including this Federated Catalogue. GXFS was a national initiative under the umbrella of Gaia-X, funded by the German Federal Ministry for Economic Affairs and Climate Action (BMWK). With the programme's conclusion, the Federation Services were transferred to the Eclipse Foundation under the **XFSC** (Cross Federation Services Components) project, where they continue to be maintained and evolved. Historical references to "GXFS" in this codebase therefore refer to the original programme; "XFSC" refers to the current Eclipse project.
+
 |Credential (formerly Self-Description / SD)
 |A credential is a Verifiable Presentation (VP) or standalone Verifiable Credential (VC) that expresses characteristics of a Resource, Service Offering or Participant and describes properties and Claims which are linked to the Identifier. The catalogue accepts both forms; in strict/Gaia-X mode a VP wrapper is required. In the Gaia-X specificationfootnote:[https://docs.gaia-x.eu/technical-committee/identity-credential-access-management/24.07/credential_format/[Gaia-X Identity, Credential and Access Management / Credential format]], this concept replaces what was previously called a "Self-Description". At the catalogue's API and storage level, credentials are managed as **Assets**.
 
@@ -133,7 +136,7 @@ The identifier must be a valid IRI (see ADR 7).
 |The profile configuration returned by `TrustFrameworkProfileResolver` for a given bundle, formed per call by layering the Bundle Config Override (if present) on top of the bundle YAML, with hard-coded defaults filling the remainder. Consumed by the compliance pipeline; also surfaced to the admin UI together with the set of identifiers whose effective value currently comes from an override. See ADR 19.
 
 |Schema Module
-|One of the four runtime-toggleable schema languages exposed on the admin schema-modules page: `SHACL`, `JSON_SCHEMA`, `XML_SCHEMA`, `OWL`. Each toggle persists to the `admin_config` table under `schema.module.<MODULE>.enabled`. Validators (SHACL, JSON Schema, XML Schema) gate the corresponding validator at on-demand validation and credential verification; the OWL toggle gates the runtime composite-ontology subclass walk in base-class resolution. See ADR 16.
+|One of the four runtime-toggleable schema languages exposed on the admin schema-modules page: SHACL, JSON Schema, XML Schema, and OWL. Each toggle is persisted by the catalogue and survives restarts. The first three gate the corresponding validator at on-demand validation and credential verification; the OWL toggle gates the runtime composite-ontology subclass walk in base-class resolution. See ADR 16.
 
 |OWL Module Toggle
 |The admin toggle that gates the `rdfs:subClassOf+` walk over runtime-uploaded ontologies during base-class resolution. When off, the catalogue resolves only types reachable through the registry index and `additional_roots`; credentials whose type relies on a runtime-uploaded ontology fall through to `ResolvedBaseClass.UNKNOWN` and are rejected by the verification entry point with `400 Bad Request`. Registry-direct types keep resolving. See ADR 16.
@@ -142,6 +145,21 @@ The identifier must be a valid IRI (see ADR 7).
 |The third tier of base-class resolution: a SPARQL `rdfs:subClassOf+` traversal performed by `ClaimValidator.resolveSubjectBaseClass` against the runtime composite ontology, run only when the registry index and `additional_roots` (tiers 1 and 2) do not recognise a credential's type. Gated by the OWL schema-module toggle (see ADR 16).
 
 |Composite Ontology
-|The in-memory Jena `OntModel` formed by union of every `ONTOLOGY`-type schema row currently stored in the catalogue. Cached process-wide by `SchemaStoreImpl.COMPOSITE_SCHEMAS` and invalidated on schema add/update/delete/clear. Consumed by the subclass walk during role resolution and by the on-demand validation endpoint when returning the composite SHAPE graph.
+|The in-memory Jena `OntModel` formed by union of every `ONTOLOGY`-type schema row currently stored in the catalogue. Cached process-wide and invalidated on schema add/update/delete/clear. Consumed by the subclass walk during role resolution and by the on-demand validation endpoint when returning the composite SHAPE graph.
+
+|SRS (Software Requirements Specification)
+|The authoritative requirements document for the Federated Catalogue, owned outside this architecture document. SRS-resident requirements are identified by IDs of the form `CAT-FR-<area>-<n>` (functional) or `CAT-NFR-<n>` (non-functional); the architecture document refers to these IDs in chapter 1 only and otherwise speaks in terms of the underlying architectural concept.
+
+|EVC / EVP (Enveloped Verifiable Credential / Presentation)
+|W3C VC 2.0 wrappers that carry a JWT-encoded credential or presentation inside a JSON-LD outer envelope (using a `data:` URI). They preserve the JSON-LD shape required by the W3C VC 2.0 pipeline while keeping the cryptographic signature in the inner JWT. The catalogue treats EVC/EVP wrappers as VC 2.0 content and routes them through the generic VC 2.0 processor.
+
+|Audit Shadow (Hibernate Envers)
+|A shadow table maintained automatically by Hibernate Envers alongside an audited entity. Every insert, update, and delete on the source entity creates a snapshot row in its audit shadow, linked to a global revision entity that timestamps each operation. Used by the catalogue to record asset, schema-file, and schema-term history. The exact shadow-table column shape is defined in the Liquibase changelog, not in this document.
+
+|Provenance Credential
+|A credential the catalogue stores alongside an asset to record where the asset came from (issuer, timestamp, supporting attestations). Provenance credentials are persisted in a dedicated relational entity and are deleted together with the asset they belong to via the asset-deletion event.
+
+|RDF-star
+|An RDF 1.2 extension that allows triples themselves to be the subject or object of other triples ("statements about statements"), written with the `<<( s p o )>>` syntax. The catalogue's Fuseki graph backend stores credential claims as RDF-star quoted triples so that the originating credential subject can be attached to each claim without losing graph-query semantics. Queries against the Fuseki backend must use SPARQL-star (SPARQL extended for RDF-star).
 
 |===

@@ -9,6 +9,12 @@ ifndef::imagesdir[:imagesdir: ../../images]
 :toc:
 
 [[section-system-scope-and-context]]
+== System Scope and Context
+
+The Federated Catalogue is a federation-services component: it is operated by one party (the *Federator*) and consumed by many (Participants in the federation, acting in Provider or Consumer roles).
+It does not have a direct end-user interface — clients interact with it through a Portal or through their own services that speak the catalogue's API.
+The technical deployment topology, including the surrounding Keycloak, PostgreSQL, and graph store, is described in <<section-deployment-view>>.
+
 === Business Context
 The following table shortly lists the Stakeholders for the federated catalogue:
 
@@ -16,12 +22,17 @@ The following table shortly lists the Stakeholders for the federated catalogue:
 |===
 | Stakeholder | Description
 | Federator | Responsible for operating the Federated Catalogue.
-| Participant (in a Federation), typically in the Provider role | Onboarded entity, according to http://docs.gaia-x.eu/technical-committee/architecture-document/latest/conceptual_model/#participants[this] definition. A Participant has a Gaia-X credential.
+| Participant (in a Federation), typically in the Provider role | Onboarded entity, according to https://docs.gaia-x.eu/technical-committee/architecture-document/25.05/trust_framework_architecture/#definitions[this] definition. A Participant has a Gaia-X credential.
 | Provider | Special type of _Participant_, who might submit credentials to the Catalogue.
 | Consumer | Special type of _Participant_, who can consume services in Gaia-X
 | User | Usually a person action on behalf of a _Participant_. A users interacts (maybe with the help of other components, like the portal) with the federated catalogue. The accessible endpoints depend on the rule, a user has.
 |===
 
-More information can be found in the http://docs.gaia-x.eu/technical-committee/architecture-document/latest/[Gaia-X Architecture document].
+More information can be found in the https://docs.gaia-x.eu/technical-committee/architecture-document/25.05/[Gaia-X Architecture Document — Loire 25.05].
+
+NOTE: The Gaia-X document set releases its sub-documents on independent version tracks.
+For the Loire release these are: **Architecture 25.05**, **Compliance 25.10**, **ICAM 24.07**, **Data Exchange 25.07**, **Ontology 25.11** (source: https://docs.gaia-x.eu/).
+External Gaia-X links throughout this document are intentionally pinned to the corresponding Loire-track version per sub-document.
+Do **not** rewrite them to `/latest/`: a future Gaia-X release would silently change the reader's interpretation of statements authored against Loire.
 
 
