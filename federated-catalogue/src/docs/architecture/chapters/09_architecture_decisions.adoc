@@ -38,27 +38,25 @@ The federated catalogue itself also consists of different, individually deployab
 
 === ADR 3: Disable Signature Verification by Default
 
-**Context:** The verification pipeline has four independent flags: `semantics`, `schema`, `vp-signature`, and `vc-signature`. Signature verification resolves the `verificationMethod` DID, retrieves the public key, and verifies the JWS proof. However, without the Gaia-X trust framework (`gaiax.enabled=true`), the `x5u` certificate chain that binds the DID to a vetted legal entity is never validated.
+**Context:** The verification pipeline has three independent flags: `semantics`, `vp-signature`, and `vc-signature`. Signature verification resolves the `verificationMethod` DID, retrieves the public key, and verifies the JWS proof. However, without the Gaia-X trust framework (`gaiax.enabled=true`), the `x5u` certificate chain that binds the DID to a vetted legal entity is never validated.
 
 Without the trust anchor chain, signature verification only proves internal consistency (the credential was signed by whoever controls that DID) and tamper detection (the payload has not been modified). It does not establish identity, trust, or accountability — anyone can create a `did:web` on a server they control and sign arbitrary claims.
 
 This makes signature verification without trust anchor enforcement ineffective as a security measure. Meanwhile, keeping signatures enabled by default forces all deployments to stand up DID resolution infrastructure even when not using the Gaia-X trust framework.
 
-**Decision:** Disable `vp-signature` and `vc-signature` in the default application profile (`application.yml`). Signature verification is re-enabled in the strict deployment profile alongside the full trust framework (Gaia-X enabled, schema validation, trust anchor registry).
+**Decision:** Disable `vp-signature` and `vc-signature` in the default application profile (`application.yml`). Signature verification is re-enabled in the strict deployment profile alongside the full trust framework (Gaia-X enabled, trust anchor registry).
 
 [cols="1,1,1"]
 |===
 | Flag | Default profile | Strict profile
 
 | `semantics` | `true` | `true`
-| `schema` | `false` | `true`
 | `vp-signature` | `false` | `true`
 | `vc-signature` | `false` | `true`
 | `gaiax.enabled` | `false` | `true`
 |===
 
-This aligns with the principle that validation flags providing no security value without the trust framework should not be forced by default.
-Production deployments must explicitly enable signatures together with the trust framework.
+Validation flags that provide no security value without the trust framework should not be forced by default. Production deployments must explicitly enable signatures together with the trust framework. Schema validation is not a per-request deploy-time toggle on the upload path at all — it is invoked on-demand through `POST /assets/validate`.
 
 === ADR 4: Non-RDF Asset Storage Strategy
 
@@ -283,7 +281,7 @@ service-offering:
   type: "https://w3id.org/gaia-x/2511#ServiceOffering"
 ----
 
-Format-aware resolution in `CredentialVerificationStrategy.resolveBaseClass()`:
+Format-aware resolution in `CredentialIngestionStrategy.resolveBaseClass()`:
 
 * `GAIAX_V2_LOIRE` → uses `type` (2511 URIs)
 * `VC2_DANUBETECH` → skips Gaia-X base-class resolution entirely (domain-specific ontologies)
@@ -598,7 +596,7 @@ Registry-direct types (Participant, ServiceOffering, Resource for the Gaia-X 251
 * Disabling a validator is *permissive* (a check is skipped); disabling OWL is *restrictive* (the catalogue stops recognising custom subclasses).
 The asymmetry is intentional: gating base-class resolution is the strongest demonstrable effect for a type-vocabulary input, and a uniform "skip a check" semantic does not exist for OWL.
 
-* The OWL toggle is independent of the caller's `verifySchema` and `verifySemantics` flags.
+* The OWL toggle is independent of the caller's `verifySemantics` flag and the `requireBaseClass` parameter.
 Type dispatch is a configuration of the catalogue's type system, not a per-request validation step, so disabling OWL affects every internal caller of the verification path — asset upload, provenance ingest, asset metadata flow, base subscriber, and on-demand base-class resolution — independent of how those callers parameterise their request.
 
 * The SHACL toggle also gates the periodic revalidation sweep over the existing claims graph.
