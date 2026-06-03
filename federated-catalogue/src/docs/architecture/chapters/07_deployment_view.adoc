@@ -13,67 +13,58 @@ ifndef::imagesdir[:imagesdir: ../../images]
 
 == Deployment View
 
-The Federated Catalogue is provided as a container based application. The different components are shown in <<img_deployment_view>>. The main component is the `Federated Catalogue Server`. It requires a PostgreSQL-Serverfootnote:[https://www.postgresql.org/[PostgreSQL: The world's most advanced open source database]] instance to store asset metadata and a graph database instance to store the (credential) claims graph and to support the query interface of the catalogue. The graph database backend is pluggable, selected via the `graphstore.impl` configuration property. Supported backends are Neo4jfootnote:[https://neo4j.com/[Neo4j Graph Data Platform | Graph Database Management System]] (openCypher queries) and Apache Jena Fusekifootnote:[https://jena.apache.org/documentation/fuseki2/[Apache Jena Fuseki]] (SPARQL-star queries).
+The Federated Catalogue is provided as a container-based application.
+The components are shown in <<img_deployment_view>>.
+The main component is the `Federated Catalogue Server`.
+It requires a PostgreSQL-Serverfootnote:[https://www.postgresql.org/[PostgreSQL: The world's most advanced open source database]] instance to store asset metadata, and a graph database instance to store the (credential) claims graph and to support the catalogue's query interface.
+The graph database backend is pluggable.
+Supported backends are Neo4jfootnote:[https://neo4j.com/[Neo4j Graph Data Platform | Graph Database Management System]] (openCypher queries) and Apache Jena Fusekifootnote:[https://jena.apache.org/documentation/fuseki2/[Apache Jena Fuseki]] (SPARQL-star queries).
+The active backend and its connection details are operator-configurable.
 
 [#img_deployment_view,reftext='Figure {counter:refnum}']
 image::07_deployment_view.png[title="Deployment View"]
 
 In addition, a Keycloak instance is needed to handle authentication. Keycloak, as well as the portal, used to interact with the Federated Catalogue, is considered out of scope for the Federated Catalogue itself.
 
-NOTE: CAT-NFR-01footnote:[Enhancement of the XFSC Federated Catalogue. 2025. https://github.com/eclipse-xfsc/docs/blob/9a178c30f76610e5924fd72c39d259d6a8ae0461/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf] renamed the Keycloak role `Ro-SD-A` (Self-Description Administrator) to `Ro-AS-A` (Asset Administrator). Existing realm configurations that still reference `Ro-SD-A` should be updated to `Ro-AS-A`. The bundled `gaia-x-realm.json` already uses the new name.
+NOTE: **Configuration reference.** This chapter names the configuration switches an operator needs in order to plan a deployment, but the **authoritative list** of all Spring properties and environment variables — names, defaults, semantics — lives in the project wiki: https://github.com/eclipse-xfsc/federated-catalogue/wiki/Installation-%26-Configuration-Guide[Installation & Configuration Guide].
+Treat this chapter as a conceptual map and the wiki as the source of truth for exact names and current defaults.
 
-<<img_deployment_view>> shows the default ports for the components' interaction. The connection settings (hostnames, ports) are configurable. It is recommended to replace the default credentials. To store persistent data, the `Federated Catalogue Server`, `PostgreSQL` as well as the graph database (Neo4j or Fuseki) require a volume, which must be mounted into the container. Non-RDF assets are stored in a separate File Store directory (`federated-catalogue.file-store.asset.location`), which also requires a persistent volume in production.
+NOTE: The Keycloak role originally named `Ro-SD-A` (Self-Description Administrator) has been renamed to `Ro-AS-A` (Asset Administrator), reflecting the generalization from credentials to assets.
+Existing realm configurations that still reference the former role name should be updated; the bundled realm uses the new name.
+
+<<img_deployment_view>> shows the default ports for the components' interaction.
+The connection settings (hostnames, ports) are configurable.
+It is recommended to replace the default credentials.
+To store persistent data, the `Federated Catalogue Server`, `PostgreSQL` as well as the graph database (Neo4j or Fuseki) require a volume, which must be mounted into the container.
+Non-RDF assets are stored in a separate File Store directory, which also requires a persistent volume in production.
 
 **Trust Framework Bundle Override Directory.**
-An optional read-only directory can be mounted into the container and pointed to by the env var `FEDERATED_CATALOGUE_TRUST_FRAMEWORKS_OVERRIDE_PATH`.
-The expected layout is `<mount-point>/<bundle-id>/framework.yaml` (plus optional sibling `ontology.ttl` and `shapes.ttl` files), mirroring the classpath structure.
-Use this mount to customise bundle properties — for example to point `trust_anchor_url` or `service_url` at in-cluster targets — or to add new bundles entirely, without rebuilding the JAR.
-See ADR 10 for overlay deep-merge semantics.
+An optional read-only directory can be mounted into the container so that operators can customise bundle properties — for example to point trust-anchor or service URLs at in-cluster targets — or add new bundles entirely, without rebuilding the JAR.
+The directory layout mirrors the bundled classpath structure (one sub-directory per bundle, containing the framework descriptor and optional ontology/shapes files).
+The mount path is configured via the `FEDERATED_CATALOGUE_TRUST_FRAMEWORKS_OVERRIDE_PATH` environment variable (Spring property: `federated-catalogue.trust-frameworks.override-path`); see ADR 10 for overlay deep-merge semantics and the wiki configuration guide for the property's full description.
 
 **Activating a Trust Framework Family.**
 Bundled trust-framework families (e.g. `gaia-x`) are registered but disabled by default.
-A family can be enabled at runtime via the Admin API (persisted) or statically via the `FEDERATED_CATALOGUE_ENABLED_TRUST_FRAMEWORKS` environment variable (applied on every boot).
-Refer to the OpenAPI specification for the exact endpoint contract.
+A family can be enabled at runtime via the Admin API (persisted) or statically at start-up via the `FEDERATED_CATALOGUE_ENABLED_TRUST_FRAMEWORKS` environment variable (applied on every boot).
+Refer to the OpenAPI specification for the exact admin-endpoint contract and to the wiki configuration guide for the boot-time properties.
 
 Kubernetesfootnote:[https://kubernetes.io/[Kubernetes]] is the recommended infrastructure for production deployment. For development, Dockerfootnote:[https://www.docker.com/[Docker: Accelerated, Containerized Application Development]] in combination with docker-compose can be used.
 
-=== Admin UI — Keycloak Setup
+=== Admin UI and Keycloak Integration
 
-==== Admin Role
+The catalogue's admin endpoints are gated by a dedicated client role on the Keycloak side, and the demo portal embeds the Keycloak Admin Console in an iframe for the user-management view.
+Three architectural facts shape this surface:
 
-Users need the `ADMIN_ALL` client role to access `/admin/**` endpoints. Without it, the admin UI is hidden and returns HTTP 403.
+* **Admin gating.** A single client role grants access to all admin endpoints; without it the admin UI is hidden and requests are rejected as unauthorised.
+* **Realms are organised per environment.** The repository ships pre-configured realm exports for development, staging, and production.
+Which realm Keycloak loads at start-up is operator-controlled.
+* **iframe embedding requires browser-security headers to be relaxed.** Both the platform realm and the catalogue realm need `X-Frame-Options` and `Content-Security-Policy` (`frame-ancestors`) adjusted to allow the portal origin; the bundled realms include preliminary values for the demo setup.
+The Admin Console URL the portal uses can be derived from the catalogue's Keycloak settings, with an explicit override available when Keycloak is reached under a different hostname (for example, behind an ingress).
 
-==== Environment Configuration
-
-Realm files are organized by environment in `keycloak/realms/{dev,staging,prod}/`. The `KC_REALM_ENV` variable selects which to load at startup.
-
-[options="header",cols="1,2"]
-|===
-| Directory | Target environment
-| `keycloak/realms/dev/` | Local development
-| `keycloak/realms/staging/` | Staging
-| `keycloak/realms/prod/` | Production
-|===
-
-==== iFrame Embedding — Security Headers
-
-The user management page embeds the Keycloak Admin Console in an iFrame. Update these headers in **both `master` and `gaia-x` realms** (via Realm Settings → Security Defenses, or in the realm JSON):
-
-[options="header",cols="1,2"]
-|===
-| Header | Change
-| `xFrameOptions` | Remove (set to empty string `""`)
-| `contentSecurityPolicy` | Add `<portal-origin>` to `frame-ancestors`
-|===
-
-Replace `<portal-origin>` with your portal URL (e.g., `http://localhost:8088` for dev, `https://catalogue.example.com` for prod). Bundled realm files already have preliminary values.
-
-==== Admin Console URL
-
-The demo portal auto-derives the Admin Console URL from `keycloak.auth-server-url` and `keycloak.realm` (aliased as `admin.dashboard.keycloak-auth-server-url` / `admin.dashboard.keycloak-realm`). Override with `KEYCLOAK_ADMIN_CONSOLE_URL` (or `admin.dashboard.keycloak-admin-console-url`) if Keycloak is behind a different hostname.
+Step-by-step operator procedures for realm bootstrap, role assignment, iframe header changes, and the Admin Console URL override live in the wiki https://github.com/eclipse-xfsc/federated-catalogue/wiki/FC-Administration-Guide[FC Administration Guide].
 
 === Runtime Admin Configuration
 
 Most catalogue features that an operator can flip at runtime are persisted in the `admin_config` PostgreSQL table — including the four schema-module toggles (`schema.module.SHACL.enabled`, `schema.module.JSON_SCHEMA.enabled`, `schema.module.XML_SCHEMA.enabled`, `schema.module.OWL.enabled`) and the per-framework enabled flag in `trust_frameworks`. Values written through the admin endpoints survive restarts; no new environment variables are introduced by this layer.
 
-`federated-catalogue.verification.schema` (start-up boolean) and the four `schema.module.*.enabled` rows (admin-controlled booleans) operate at different layers. The start-up flag selects whether SHACL is consulted at all during credential upload; the admin module toggles then gate the corresponding validator wherever it would otherwise run. See ADR 16 for the toggle semantics, including the asymmetric role of the OWL toggle (which gates base-class resolution).
+The four `schema.module.*.enabled` rows (admin-controlled booleans) gate the corresponding validator wherever it would otherwise run on the on-demand `POST /assets/validate` path. Schema validation is never run automatically on the credential upload path. See ADR 16 for the toggle semantics, including the asymmetric role of the OWL toggle (which gates base-class resolution).

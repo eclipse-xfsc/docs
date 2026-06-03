@@ -5,7 +5,7 @@
 //
 // ====================================
 
-= Architecture Gaia-X Federated Catalogue image:Federated-Catalogue.png[Federated Catalogue]
+= XFSC Federated Catalogue — Architecture image:Federated-Catalogue.png[Federated Catalogue]
 // toc-title definition MUST follow document title without blank line!
 :toc-title: Table of Contents
 :toclevels: 3

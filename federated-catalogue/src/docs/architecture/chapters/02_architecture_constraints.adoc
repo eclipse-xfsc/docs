@@ -11,6 +11,10 @@ ifndef::imagesdir[:imagesdir: ../../images]
 [[section-architecture-constraints]]
 == Architecture Constraints
 
-The constraints are written in the specification of the Federated Catalogue.
+The detailed constraints on the Federated Catalogue (functional and non-functional requirements, quality scenarios, compliance obligations) are owned by the Software Requirements Specification and the successor "XFSC Federated Catalogue Enhancement" document, not restated here.
+This chapter records only the cross-cutting constraints that shape every architectural decision below.
 
-One main requirement to mention at this place is the requirement that all used components must be compliant with https://www.apache.org/licenses/LICENSE-2.0[Apache License, Version 2.0]
+* **License.** All components used by the Federated Catalogue must be compatible with the https://www.apache.org/licenses/LICENSE-2.0[Apache License, Version 2.0].
+This rules out copyleft-licensed dependencies for embedded use.
+* **Target trust framework.** The current implementation is maintained against Gaia-X Loire (see ADR 9 and the NOTE in chapter <<section-solution-strategy>>); compliance with Loire is therefore an architectural constraint, not a per-deployment choice.
+* **Federated context.** The catalogue runs in a federated ecosystem spanning operators, jurisdictions, and time zones; design decisions must not assume a single authoritative deployment, single trust anchor, or single time zone.

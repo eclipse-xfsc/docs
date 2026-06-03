@@ -1,15 +1,39 @@
 # Architecture document for the GXFS Catalogue
+
 ## XFSC Federated Catalogue
-The content of the document is available here
-* [PDF](
-https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/architecture-document/-/jobs/artifacts/main/raw/build/pdf/architecture/catalogue-architecture.pdf?job=generate_pdf)
-* [Website](https://gaia-x.gitlab.io/data-infrastructure-federation-services/cat/architecture-document/architecture/catalogue-architecture.html)
 
-## FACIS - XFSC Catalogue Enhancements
-The XFSC Federated Catalogue (CAT) manages metadata objects (typically credentials or other RDF descriptions, e.g., of Providers, their Service Offerings and Resources) throughout their life cycle and exposes them to Consumers. It enables verification of these objects against given schemas and/or trust anchors. 
+The rendered architecture document (HTML site + PDF) is produced by the
+[`Run docToolchain`](https://github.com/eclipse-xfsc/docs/actions/workflows/buildDocs.yml) workflow on every push to
+`main` and uploaded as the `Documentation` artifact (containing
+`federated-catalogue/build/pdf/architecture/catalogue-architecture.pdf` and the full `build/html5/` site).
 
-This enhancement of the CAT modularizes its verification of credentials against trust anchors and generalizes its management of metadata objects beyond the former focus on credentials; thus, it will also be able to function as a Template Repository for the FACIS Digital Contract Service (DCS).
+Get the latest rendered docs:
 
-The enhanced specification document can be found here : [PDF](https://github.com/eclipse-xfsc/docs/blob/main/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf)
+1. Open the [latest successful `Run docToolchain` run on `main`](https://github.com/eclipse-xfsc/docs/actions/workflows/buildDocs.yml?query=branch%3Amain+is%3Asuccess).
+2. Scroll to the **Artifacts** section and download `Documentation.zip`.
+3. Unzip — open `catalogue-architecture.pdf` for the PDF or `html5/architecture/catalogue-architecture.html` for the website.
 
-The implementation of the federated catalogue can be found here : [`implementation/federated-catalogue`](https://github.com/eclipse-xfsc/federated-catalogue)
+> Note: GitHub Actions artifacts expire after 90 days. For a permanent reference, link to the workflow run's commit SHA.
+
+The architecture is built by
+the [buildDocs workflow](https://github.com/eclipse-xfsc/docs/actions/workflows/buildDocs.yml) in the
+`eclipse-xfsc/docs` repository. Each workflow run uploads a `Documentation.zip` artifact containing the rendered static
+HTML and PDF; download it from the "Artifacts" section of the most recent successful run.
+
+> TODO: replace the workflow-run download with a stable, versioned public URL (e.g. GitHub Pages or a release asset)
+> once that publication channel is in place.
+
+## About the Catalogue
+
+The XFSC Federated Catalogue manages metadata objects — typically verifiable credentials or RDF descriptions of
+providers, service offerings, and resources — throughout their life cycle and exposes them to consumers. It verifies
+these objects against schemas and trust anchors.
+
+The current generation of the catalogue modularizes credential verification against trust anchors and generalizes
+metadata-object management beyond credentials, enabling reuse as a template repository for adjacent services.
+
+The full functional and non-functional specification is published in the same documentation repository and linked from
+the rendered website above.
+
+The reference implementation lives
+at [eclipse-xfsc/federated-catalogue](https://github.com/eclipse-xfsc/federated-catalogue).

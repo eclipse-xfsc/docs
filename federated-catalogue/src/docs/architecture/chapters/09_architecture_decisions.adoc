@@ -11,6 +11,13 @@ ifndef::imagesdir[:imagesdir: ../../images]
 [[section-design-decisions]]
 == Architecture Decisions
 
+This chapter records the architecture decisions that shape the Federated Catalogue, in chronological order of the decision itself rather than in dependency order.
+Each ADR captures the context, the options considered, the decision taken, and its rationale.
+ADRs may reference each other (and are sometimes superseded by later ones); the chapter is meant to be browsed by topic, not necessarily read linearly.
+
+NOTE: ADR numbers 11 through 14 are intentionally absent: they were drafted as exploratory options for the bundle/profile design but were superseded by ADR 10 (Trust Framework Bundles) before being recorded as decisions.
+The numbering gap is preserved to keep stable references to the surviving ADRs (10, 15, …) intact.
+
 === ADR 1: Monolithic vs. Microservices
 **Context:** Are the subcomponents implemented as separate micro-services or are they integrated into a single service.
 
@@ -18,7 +25,8 @@ ifndef::imagesdir[:imagesdir: ../../images]
 2. **Single Service**: Easier maintainability, understanding, easier to handle concurrency (especially conflicting operations like adding an asset and changing schema)
 
 **Decision:** Implement catalogue as a modular, single service. It's easier to integrate the different components. Most components are called by only one other component. A distributed microservice implementation only introduces additional communication overhead. Scalability issues are not expected, since the main load is read-only and time consuming operations are queries against the graph db, which is a separate component that can be horizontally scaled.
-Therefore, the Federated Catalogue is considered as microservice application within the GXFS ecosystem. The federated catalogue itself also consists of different, individually deployable components.
+Therefore, the Federated Catalogue is considered as a microservice application within the surrounding Federation Services ecosystem.
+The federated catalogue itself also consists of different, individually deployable components.
 
 === ADR 2: Intra Catalogue communication
 **Context:** If the catalogue is implemented as one component, the subcomponents can communication using Method-calls. Another option is to implement an internal event-/notification system, whereby each component registers itself as a listener on other components or a central message bus.
@@ -30,33 +38,34 @@ Therefore, the Federated Catalogue is considered as microservice application wit
 
 === ADR 3: Disable Signature Verification by Default
 
-**Context:** The verification pipeline has four independent flags: `semantics`, `schema`, `vp-signature`, and `vc-signature`. Signature verification resolves the `verificationMethod` DID, retrieves the public key, and verifies the JWS proof. However, without the Gaia-X trust framework (`gaiax.enabled=true`), the `x5u` certificate chain that binds the DID to a vetted legal entity is never validated.
+**Context:** The verification pipeline has three independent flags: `semantics`, `vp-signature`, and `vc-signature`. Signature verification resolves the `verificationMethod` DID, retrieves the public key, and verifies the JWS proof. However, without the Gaia-X trust framework (`gaiax.enabled=true`), the `x5u` certificate chain that binds the DID to a vetted legal entity is never validated.
 
 Without the trust anchor chain, signature verification only proves internal consistency (the credential was signed by whoever controls that DID) and tamper detection (the payload has not been modified). It does not establish identity, trust, or accountability — anyone can create a `did:web` on a server they control and sign arbitrary claims.
 
 This makes signature verification without trust anchor enforcement ineffective as a security measure. Meanwhile, keeping signatures enabled by default forces all deployments to stand up DID resolution infrastructure even when not using the Gaia-X trust framework.
 
-**Decision:** Disable `vp-signature` and `vc-signature` in the default application profile (`application.yml`). Signature verification is re-enabled in the strict deployment profile alongside the full trust framework (Gaia-X enabled, schema validation, trust anchor registry).
+**Decision:** Disable `vp-signature` and `vc-signature` in the default application profile (`application.yml`). Signature verification is re-enabled in the strict deployment profile alongside the full trust framework (Gaia-X enabled, trust anchor registry).
 
 [cols="1,1,1"]
 |===
 | Flag | Default profile | Strict profile
 
 | `semantics` | `true` | `true`
-| `schema` | `false` | `true`
 | `vp-signature` | `false` | `true`
 | `vc-signature` | `false` | `true`
 | `gaiax.enabled` | `false` | `true`
 |===
 
-This aligns with CAT-FR-SF-04 (remove forced validation): validation flags that provide no security value without the trust framework should not be forced by default. Production deployments must explicitly enable signatures together with the trust framework.
+Validation flags that provide no security value without the trust framework should not be forced by default. Production deployments must explicitly enable signatures together with the trust framework. Schema validation is not a per-request deploy-time toggle on the upload path at all — it is invoked on-demand through `POST /assets/validate`.
 
 === ADR 4: Non-RDF Asset Storage Strategy
 
 **Context:** The catalogue needs to support non-RDF assets (PDFs, plain JSON, YAML, images, binary files) alongside RDF credentials. Several approaches were considered:
 
 1. **Separate `/assets` endpoint and storage:** New endpoint, new database table, new service layer. Clean separation but duplicates lifecycle management, filtering, and metadata handling.
-2. **Unified endpoint with dual-path routing:** Extend the existing `POST /assets` endpoint (formerly `POST /self-descriptions`) to accept non-RDF content. Reuse the `assets` table (formerly `sdfiles`, extended with asset metadata columns), the `AssetStore` interface, and the existing filter/lifecycle infrastructure. Route to verification or direct storage based on content-type detection.
+2. **Unified endpoint with dual-path routing:** Extend the existing asset-upload endpoint (which historically served only credentials, under the Self-Description name) to also accept non-RDF content.
+Reuse the relational asset entity, the `AssetStore` interface, and the existing filter/lifecycle infrastructure.
+Route to verification or direct storage based on content-type detection.
 3. **External object storage (S3/MinIO):** Delegate non-RDF storage to an external system. Adds infrastructure complexity and a new dependency.
 
 **Decision:** Option 2 — unified endpoint with dual-path routing.
@@ -97,7 +106,8 @@ Backward compatibility is maintained by converting the legacy roles (Ro-MU-CA, R
 
 === ADR 6: Claim Class Naming Convention
 
-**Context:** CAT-NFR-01footnote:cat-enhancement[Enhancement of the XFSC Federated Catalogue. 2025. https://github.com/eclipse-xfsc/docs/blob/9a178c30f76610e5924fd72c39d259d6a8ae0461/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf] renamed the legacy `SdClaim` class (tied to Self-Description terminology). The team needed to decide on the new name. Three options were considered:
+**Context:** The generalisation away from Self-Description-specific terminology required renaming the legacy `SdClaim` class.
+Three options were considered:
 
 1. **`Claim`** — generic, forward-looking, but too broad for the current implementation which only extracts claims from credentials.
 2. **`AssetClaim`** — aligns with the generic asset terminology but is misleading because non-RDF assets cannot have claims.
@@ -149,10 +159,13 @@ The rename to `RdfClaim` was doen while adding non-credential claims extraction.
 
 === ADR 7: IRI-Based Asset Identification
 
-**Context:** CAT-FR-AM-02: Each Asset MUST be identified by an IRI. DIDs and UUIDs as URNs (RFC 4122) MUST be supported.footnote:cat-enhancement[] The previous implementation used content-hash-based identifiers (`urn:asset:sha256:<hash>`) for non-RDF assets and `credentialSubject` for RDF credentials. Three approaches were considered:
+**Context:** The catalogue specification requires every asset to be identified by an IRI, with explicit support for DIDs and for UUIDs in URN form.
+The previous implementation used content-hash-based identifiers for non-RDF assets and `credentialSubject` IRIs for RDF credentials.
+Three approaches were considered:
 
-1. **Keep hash-based identifiers:** Simple but violates CAT-FR-AM-02 — content hashes are not IRIs in the W3C sense, and they couple identity to content (any content change produces a new identifier).
-2. **UUID URNs for all assets:** Assign a UUID URN (`urn:uuid:...`) per RFC 4122footnote:[https://www.rfc-editor.org/rfc/rfc4122[RFC 4122 — A Universally Unique IDentifier (UUID) URN Namespace]] to every asset regardless of type. Simple and uniform but discards the meaningful identifiers already present in RDF content (DIDs, ontology IRIs).
+1. **Keep hash-based identifiers:** Simple but does not satisfy the IRI requirement — content hashes are not IRIs in the W3C sense, and they couple identity to content (any content change produces a new identifier).
+2. **UUID URNs for all assets:** Assign a UUID URN per RFC 4122footnote:[https://www.rfc-editor.org/rfc/rfc4122[RFC 4122 — A Universally Unique IDentifier (UUID) URN Namespace]] to every asset regardless of type.
+Simple and uniform but discards the meaningful identifiers already present in RDF content (DIDs, ontology IRIs).
 3. **IRI extraction with UUID fallback:** Extract IRIs from RDF content where possible (`credentialSubject.id`, `@id`, ontology/shapes/vocabulary IRIs), generate UUID URNs for non-RDF assets and as fallback for RDF content without an extractable IRI.
 
 **Decision:** Option 3 — IRI extraction with UUID URN fallback.
@@ -166,7 +179,9 @@ The public API is extended with IRI-based methods (`getById`, `getFileById`) alo
 
 The `federated-catalogue.asset.subject-id-prefix` configuration property is removed — IRI generation is now handled entirely by `IriGenerator`.
 
-**Rationale:** Extracting meaningful IRIs from RDF content preserves semantic identity (a DID or ontology IRI carries provenance information that a UUID does not). UUID URNs for non-RDF assets satisfy RFC 4122 and CAT-FR-AM-02 while providing unique, stable identifiers without coupling identity to content. The content hash is retained internally for deduplication and file storage but is no longer the public identifier.
+**Rationale:** Extracting meaningful IRIs from RDF content preserves semantic identity (a DID or ontology IRI carries provenance information that a UUID does not).
+UUID URNs for non-RDF assets satisfy RFC 4122 and the IRI requirement while providing unique, stable identifiers without coupling identity to content.
+The content hash is retained internally for deduplication and file storage but is no longer the public identifier.
 
 ==== Hash-Based Mutation Operations Exception
 
@@ -181,7 +196,10 @@ The same rationale applies to both operations:
 
 2. **Mutation semantics** Delete and revoke are irreversible operations that demand unambiguous single-row targeting. The `asset_hash` column is the PRIMARY KEY — it guarantees exactly one row is affected. The IRI identifies a _logical asset_; the hash identifies a _specific content artifact_. Mutations operate at the physical artifact level, not the logical level. For revoke specifically, hash-based lookup finds the asset regardless of its current status, enabling the business logic to return a proper 409 Conflict (e.g., attempting to revoke an already deprecated asset) rather than a misleading 404.
 
-3. **Versioning readiness (CAT-FR-LM-01)footnote:cat-enhancement[]** The planned version control feature will introduce multiple version rows per `subjectid`, each with a different `asset_hash` and status. IRI-based mutation would become increasingly ambiguous — which version should be affected? Hash-based targeting remains precise regardless of how many versions exist. When versioning is introduced, both endpoints will be replaced by version-specific operations (`POST /assets/{id}/versions/{v}/revoke`).
+3. **Versioning readiness.** The planned version-control feature will introduce multiple version rows per logical asset identifier, each with a different content hash and status.
+IRI-based mutation would become increasingly ambiguous — which version should be affected?
+Hash-based targeting remains precise regardless of how many versions exist.
+When versioning is introduced, both endpoints will be replaced by version-specific operations defined in the OpenAPI specification.
 
 4. **Audit versioning forward-look** When audit history tracking is introduced (e.g., Hibernate Envers), physical deletion conflicts with audit trail immutability. At that point, the delete operation should transition to a lifecycle status change (e.g., → EOL) rather than physical row removal. Retaining hash-based targeting keeps the migration path clean: `DELETE WHERE hash` transitions to `UPDATE status WHERE hash`. The targeting mechanism (hash) stays consistent across this evolution.
 
@@ -263,7 +281,7 @@ service-offering:
   type: "https://w3id.org/gaia-x/2511#ServiceOffering"
 ----
 
-Format-aware resolution in `CredentialVerificationStrategy.resolveBaseClass()`:
+Format-aware resolution in `CredentialIngestionStrategy.resolveBaseClass()`:
 
 * `GAIAX_V2_LOIRE` → uses `type` (2511 URIs)
 * `VC2_DANUBETECH` → skips Gaia-X base-class resolution entirely (domain-specific ontologies)
@@ -532,23 +550,23 @@ Adds a new endpoint and a new service path.
 2. **Unified `POST /assets` with subject-IRI routing:** reuse the existing upload endpoint; when the uploaded RDF's primary `@id` matches an existing non-RDF asset, route to the enrichment path.
 No new endpoint required.
 
-**Decision:** Option 2 — subject-IRI routing at `POST /assets`.
+**Decision:** Option 2 — subject-IRI routing at the asset-upload endpoint.
 
 * When uploaded RDF is detected and the asset store reports an existing non-RDF asset for the payload's primary subject IRI, the request is routed to the enrichment path.
-The lookup also enforces that `HUMAN_READABLE` assets cannot be enriched — they are rejected with HTTP 422.
-* The enrichment path validates that the payload contains at least one triple whose subject is the asset's IRI, filters protected-namespace triples (`ProtectedNamespaceFilter`), replaces the asset's graph triples (`deleteClaims` → `addClaims`), and persists the raw RDF to `assets.content`.
-The change is captured in the Hibernate Envers audit trail with `changeComment = "Metadata enriched"`.
-Returns HTTP 200.
+The lookup also enforces that human-readable-tagged assets cannot be enriched.
+* The enrichment path validates that the payload contains at least one triple whose subject is the asset's IRI, filters protected-namespace triples, replaces the asset's graph triples, and persists the raw RDF as new content on the existing asset row.
+The change is captured by the asset audit framework with an enrichment-specific change comment.
 * Each enrichment upload fully replaces the previous metadata (overwrite, no merge).
 This matches the existing RDF version-update semantics.
-* The `content_kind` column is never changed by enrichment.
+* The asset's content-kind discriminator is never changed by enrichment.
 It always records the original upload modality.
-* Storing the enrichment RDF in `assets.content` means the existing PostgreSQL→graph rebuild process picks up enriched non-RDF assets automatically — no extra rebuild logic needed.
+* Storing the enrichment RDF on the existing asset row means the existing relational-to-graph rebuild process picks up enriched non-RDF assets automatically — no extra rebuild logic needed.
 * Enrichment requires an active graph backend.
-If `graphstore.impl=none`, the request fails with HTTP 503 before any state change — graph writes are mandatory for this path.
+If the graph backend is disabled, the request is rejected before any state change — graph writes are mandatory for this path.
+The OpenAPI specification is authoritative for the exact error contracts.
 
 **Rationale:** Reusing the existing endpoint avoids a new API surface and keeps the upload contract consistent.
-Routing on `content_kind` is unambiguous and preserves backward compatibility — uploads for RDF assets and non-RDF assets are unaffected.
+Routing on the content-kind discriminator is unambiguous and preserves backward compatibility — uploads for RDF assets and non-RDF assets are unaffected.
 Overwrite semantics simplify the data model: no partial-merge conflicts, no ordering dependencies between enrichment uploads.
 
 **Related:** ADR 4, ADR 7.
@@ -578,7 +596,7 @@ Registry-direct types (Participant, ServiceOffering, Resource for the Gaia-X 251
 * Disabling a validator is *permissive* (a check is skipped); disabling OWL is *restrictive* (the catalogue stops recognising custom subclasses).
 The asymmetry is intentional: gating base-class resolution is the strongest demonstrable effect for a type-vocabulary input, and a uniform "skip a check" semantic does not exist for OWL.
 
-* The OWL toggle is independent of the caller's `verifySchema` and `verifySemantics` flags.
+* The OWL toggle is independent of the caller's `verifySemantics` flag and the `requireBaseClass` parameter.
 Type dispatch is a configuration of the catalogue's type system, not a per-request validation step, so disabling OWL affects every internal caller of the verification path — asset upload, provenance ingest, asset metadata flow, base subscriber, and on-demand base-class resolution — independent of how those callers parameterise their request.
 
 * The SHACL toggle also gates the periodic revalidation sweep over the existing claims graph.
@@ -637,16 +655,19 @@ No changes to `IssuedAttestation`, no schema migration, and no changes to any ex
 
 **Context:** The catalogue supports three graph-store backends (Neo4j, Fuseki, no-op) behind a common `GraphStore` interface. Operators need to change the active backend at runtime — for example, to move from Neo4j to Fuseki without scheduling a maintenance window — and the choice must survive a restart. A purely configuration-driven model (one adapter wired per profile, change requires editing config and restarting) makes the switch operator-hostile and couples the change to deployment tooling. Wiring all adapters and selecting one at request time keeps the switch self-service, but the choice must still be persistent and the system must not become unbootable if the operator picks a backend that is currently unreachable.
 
-**Decision:** All three adapters are wired unconditionally at boot. A single `RoutingGraphStore` (`@Primary`) holds the currently-active adapter behind a `volatile` reference and delegates every `GraphStore` call to it. Switching is exposed as `POST /admin/graph-database/switch`:
+**Decision:** All three adapters are wired unconditionally at boot.
+A single primary routing store holds the currently-active adapter behind a volatile reference and delegates every graph-store call to it.
+Switching is exposed as a dedicated admin endpoint (see the OpenAPI specification for the exact contract):
 
-. The target backend is pre-flighted by `GraphStoreProbe` — a Bolt `verifyConnectivity()` against `graphstore.neo4j.uri` for Neo4j, an HTTP GET against `graphstore.fuseki.uri` for Fuseki.
-Each probe is capped at a 3 s budget (driver-side for Bolt, request-side for HTTP), so a black-holed host cannot stall the admin endpoint past the operator's attention span.
-An unreachable target is rejected with `400 Bad Request` and no state changes.
-If the requested backend has no registered adapter in the deployment, the endpoint also returns `400` — silent fallback to `NONE` would leave the operator believing the switch succeeded.
-. On a successful probe, `RoutingGraphStore.setActive(...)` (synchronized) updates the volatile reference first; only after the swap returns is the choice persisted to `admin_config[graphstore.preferred.backend]`.
+. The target backend is pre-flighted (a Bolt connectivity check for Neo4j, an HTTP GET for Fuseki).
+Each probe is capped at a small time budget so a black-holed host cannot stall the admin endpoint past the operator's attention span.
+An unreachable target is rejected with no state changes.
+If the requested backend has no registered adapter in the deployment, the request is rejected for the same reason — silent fallback to the no-op backend would leave the operator believing the switch succeeded.
+. On a successful probe, the routing store atomically swaps the volatile reference first; only after the swap returns is the new preference persisted.
 Reversing this order would let a swap failure strand a preference for a backend the next cold boot could not actually serve.
 
-On cold boot the active backend is resolved as: persisted preference → `graphstore.impl` property → `NONE`. Each adapter opens its driver lazily on first use, so an unreachable inactive backend does not block startup.
+On cold boot the active backend is resolved as: persisted preference → deployment-time bootstrap configuration → no-op fallback.
+Each adapter opens its driver lazily on first use, so an unreachable inactive backend does not block startup.
 
 The runtime status endpoint (`GET /admin/graph-database`) reports the active backend, connectivity, claim count, and a `rebuildNeeded` flag with `rdfAssetCount`. The flag is true when the active store holds no claims but active RDF assets exist in storage — the typical state after a backend switch — and points the operator to the existing `POST /admin/graph/rebuild` endpoint, which repopulates the active backend from the metadata store.
 

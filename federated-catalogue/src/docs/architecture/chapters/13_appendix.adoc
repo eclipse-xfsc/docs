@@ -15,7 +15,9 @@ ifndef::imagesdir[:imagesdir: ../../images]
 
 These examples demonstrate how to interact with the xref:05_building_block_view#_graph_database[Graph Database].
 
-NOTE: The examples below use **openCypher** syntax, which applies to the **Neo4j** backend (`graphstore.impl=neo4j`). Send these with `Content-Type: application/opencypher-query`. When using the **Fuseki** backend (`graphstore.impl=fuseki`), equivalent queries must be expressed in **SPARQL-star** syntax and sent with `Content-Type: application/sparql-query`. See <<sparql_star_examples>> for SPARQL-star equivalents.
+NOTE: The examples below use **SPARQL-star** syntax, which applies to the **Fuseki** backend — the default in `dev.env`.
+Send these to `POST /query` with `Content-Type: application/sparql-query`.
+The **Neo4j** backend remains available; an equivalent openCypher example is shown in <<opencypher_example,Neo4j (openCypher) reference>>.
 
 All of the following examples have the same structure:
 
@@ -32,292 +34,297 @@ Get all nodes and relationships between them.
 
 ===== Data
 
-Three Participants (legal persons): https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/fc-service/-/tree/main/examples/queries/test-issuer.jsonld[1], https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/fc-service/-/tree/main/examples/queries/test-issuer2.jsonld[2], https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/fc-service/-/tree/main/examples/queries/test-issuer3.jsonld[3].
+Three Participants (legal persons): https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/test-issuer.jsonld[1], https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/test-issuer2.jsonld[2], https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/test-issuer3.jsonld[3].
+See the link:{repo-link}/examples/queries/README.md[queries README] for the VC-JWT signing and submission flow.
 
-This listing shows the full structure of a credential (Verifiable Presentation or standalone Verifiable Credential) in JSON-LD.  The following listings will focus on the credential subject, as it is only the claims about that subject which are extracted into the Graph Database.
+This listing shows the full structure of a Verifiable Credential payload in JSON-LD.
+The following listings will focus on the credential subject, as it is only the claims about that subject which are extracted into the Graph Database.
+The payload is signed as a VC-JWT before submission to `/assets` (see the queries README).
 
 [source,json]
 ----
 {
-  "@context": ["https://www.w3.org/ns/credentials/v2", "https://w3id.org/gaia-x/2511#"],
-  "type": "VerifiablePresentation",
-  "verifiableCredential": [{
-    "@context": ["https://www.w3.org/ns/credentials/v2", "https://w3id.org/gaia-x/2511#"],
-    "type": ["VerifiableCredential", "gx:LegalPerson"],
-    "issuer": "did:web:example.com",
-    "validFrom": "2026-01-30T00:00:00Z",
-    "validUntil": "2027-12-31T23:59:59Z",
-    "credentialSubject": {
-      "@context": {
-        "gx": "https://w3id.org/gaia-x/2511#",
-        "vcard": "http://www.w3.org/2006/vcard/ns#"
-      },
-      "@id": "did:web:test-issuer.example.com",
-      "@type": "gx:LegalPerson",
-      "gx:registrationNumber": "DE182676944",
-      "gx:legalAddress": {
-        "@type": "vcard:Address",
-        "vcard:country": "DE",
-        "vcard:locality": "Köln",
-        "vcard:postal-code": "50825",
-        "vcard:street-address": "Lichtstraße 43h"
-      },
-      "gx:headquarterAddress": {
-        "@type": "vcard:Address",
-        "vcard:country": "DE",
-        "vcard:locality": "Köln",
-        "vcard:postal-code": "50825",
-        "vcard:street-address": "Lichtstraße 43h"
-      },
-      "gx:legalName": "eco - Verband der Internetwirtschaft e.V.",
-      "gx:name": "eco - Verband der Internetwirtschaft"
+  "@context": [
+    "https://www.w3.org/ns/credentials/v2",
+    "https://w3id.org/gaia-x/2511#",
+    { "schema": "https://schema.org/", "vcard": "http://www.w3.org/2006/vcard/ns#" }
+  ],
+  "id": "https://www.example.org/credentials/legal-person-1.json",
+  "type": ["VerifiableCredential", "gx:LegalPerson"],
+  "issuer": "did:web:example.org",
+  "validFrom": "<ISO-8601 issuance timestamp, illustrative>",
+  "validUntil": "<ISO-8601 expiration timestamp, illustrative>",
+  "credentialSubject": {
+    "id": "https://www.example.org/participants/test-issuer-1",
+    "type": "gx:LegalPerson",
+    "schema:name": "deltaDAO AG",
+    "gx:registrationNumber": { "id": "https://www.example.org/participants/test-issuer-1/registration" },
+    "gx:legalAddress": {
+      "type": "gx:Address",
+      "gx:countryCode": "DE",
+      "vcard:locality": "Hamburg",
+      "vcard:postal-code": "22303",
+      "vcard:street-address": "Geibelstraße 46b"
+    },
+    "gx:headquartersAddress": {
+      "type": "gx:Address",
+      "gx:countryCode": "DE",
+      "vcard:locality": "Hamburg",
+      "vcard:postal-code": "22303",
+      "vcard:street-address": "Geibelstraße 46b"
     }
-  }]
+  }
 }
 
-... # two more with the same structure, just different attribute values
+... # two more participants with the same structure, different addresses
 ----
 
 ===== Query
 
-[source,cypher]
+[source,sparql]
 ----
-MATCH (m) -[relation]-> (n) RETURN m, relation, n
+PREFIX gx: <https://w3id.org/gaia-x/2511#>
+SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 100
 ----
 
 ===== Output
 
-----
-[{m={legalName=eco - Verband der Internetwirtschaft e.V.,
-     name=eco - Verband der Internetwirtschaft,
-     claimsGraphUri=[http://example.org/test-issuer]},
-  n={country=DE,
-     postal-code=50825,
-     claimsGraphUri=[http://example.org/test-issuer],
-     street-address=Lichtstraße 43h,
-     locality=Köln},
-  relation=legalAddress}, 
- {m={legalName=eco - Verband der Internetwirtschaft e.V.,
-     name=eco 2,
-     claimsGraphUri=[http://example.org/test-issuer2]},
-  n={country=DE,
-     postal-code=11111,
-     claimsGraphUri=[http://example.org/test-issuer2],
-     street-address=1 Test Street,
-     locality=Cologne},
-  relation=legalAddress}, 
- {m={legalName=eco - Verband der Internetwirtschaft e.V.,
-     name=eco 3,
-     claimsGraphUri=[http://example.org/test-issuer3]},
-  n={country=DE,
-     postal-code=22222,
-     claimsGraphUri=[http://example.org/test-issuer3],
-     street-address=2 Test Street,
-     locality=Kölle},
-  relation=legalAddress}]
-----
+A standard SPARQL solution sequence; one row per triple.
+The interesting rows (legal/headquarters address and `gx:subOrganisationOf` edges) include:
 
-Note that, via the special property +claimsGraphUri+ all nodes have a link back to the ID of the credential subject from which they have been extracted.  This way, it is possible to obtain further information about the respective asset from the Metadata Store.
+[options="header",cols="3,2,3"]
+|===
+| ?s | ?p | ?o
+
+| `<.../participants/test-issuer-1>` | `gx:legalAddress`        | _bnode_ (Hamburg address)
+| `<.../participants/test-issuer-1>` | `gx:headquartersAddress` | _bnode_ (Hamburg address)
+| `<.../participants/test-issuer-1>` | `schema:name`            | `"deltaDAO AG"`
+| `<.../participants/test-issuer-2>` | `gx:legalAddress`        | _bnode_ (Dresden address)
+| `<.../participants/test-issuer-3>` | `gx:subOrganisationOf`   | `<.../participants/test-issuer-1>`
+|===
+
+To recover the asset IRI each triple was extracted from, Fuseki annotates every claim with `cred:credentialSubject` as an RDF-star quoted triple.
+See <<provenance_via_rdf_star>>.
 
 ==== Simple Relationship
 
-Check whether +ServiceOffering+ has two properties, one of which has a value with a certain label (i.e., identifier), and return the URI of the +ServiceOffering+.
+Return Service Offerings that are provided by a given Legal Person.
 
 ===== Data
 
-One Service Offering; see https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/fc-service/-/tree/main/examples/queries/serviceElasticSearch[file].
+Two Service Offerings, both provided by `test-issuer-1`: https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/credentialSubject2.jsonld[1], https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/serviceElasticSearch.jsonld[2].
+The Legal Person credential https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/test-issuer.jsonld[test-issuer.jsonld] must already be in the graph.
 
 [source,json]
 ----
 {
-  "@id": "http://w3id.org/gaia-x/indiv#serviceElasticSearch.json",
-  "@type": "gx:ServiceOffering",
-  "ex:some_property": {
-    "ex:some_other_property": {
-      "@value": "ex:some_service",
-      "@type": "gx:ServiceOffering"
-    }
-  },
-  "gx:name": "Elastic Search DB"
+  "id": "https://www.example.org/service-offerings/elasticsearch",
+  "type": "gx:ServiceOffering",
+  "schema:name": "Elastic Search DB",
+  "gx:providedBy": { "id": "https://www.example.org/participants/test-issuer-1" }
 }
 ----
 
 ===== Query
 
-[source,cypher]
+[source,sparql]
 ----
-MATCH (o)<-[:some_other_property]-(n:ServiceOffering)-[:some_property]->(m) WHERE o.label=resource24 RETURN n.uri
+PREFIX gx:     <https://w3id.org/gaia-x/2511#>
+PREFIX schema: <https://schema.org/>
+
+SELECT ?service ?name WHERE {
+  ?service a gx:ServiceOffering ;
+           gx:providedBy <https://www.example.org/participants/test-issuer-1> ;
+           schema:name ?name .
+}
 ----
 
 ===== Output
 
-----
-[{n.uri=http://ex.com/credentialSubject2}]
-----
+[options="header"]
+|===
+| ?service | ?name
+| `<.../service-offerings/service-1>`     | `"Example Compute Service"`
+| `<.../service-offerings/elasticsearch>` | `"Elastic Search DB"`
+|===
 
 ==== Essential Attributes
 
-Return the type, name, legal address and legal name of a (+Participant+) credential.
+Return the type, name and legal address of a Participant credential.
 
 ===== Data
 
-A Participant like used in the query for <<anchor:_all_nodes_and_relationships,all nodes and relationships>>; see https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/fc-service/-/tree/main/examples/queries/test-issuer2.jsonld[file].
+A Legal Person; see https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/test-issuer2.jsonld[test-issuer2.jsonld].
 
 [source,json]
 ----
 {
-  "@id": "ex:test-issuer2",
-  "@type": "gx:LegalPerson",
+  "id": "https://www.example.org/participants/test-issuer-2",
+  "type": "gx:LegalPerson",
+  "schema:name": "deltaDAO Dresden GmbH",
   "gx:legalAddress": {
-    "@type": "vcard:Address",
-    "vcard:country": "DE",
-    "vcard:locality": "Cologne",
-    "vcard:postal-code": "11111",
-    "vcard:street-address": "1 Test Street"
-  },
-  "gx:legalName": "eco - Verband der Internetwirtschaft e.V.",
-  "gx:name": "eco 2"
-}
-----
-
-===== Query
-
-[source,cypher]
-----
-MATCH (m)-[:legalAddress]->(n) RETURN LABELS(m) as type, n as legalAddress, m.legalName as legalName, m.name as name
-----
-
-===== Output
-
-----
-[{legalName=eco - Verband der Internetwirtschaft e.V.,
-  name=eco 2,
-  type=[Resource,LegalPerson],
-  legalAddress={country=DE,
-                postal-code=11111,
-                claimsGraphUri=[http://example.org/test-issuer2],
-                street-address=1 Test Street,
-                locality=Cologn}}]
-----
-
-==== Entity having a Property
-
-Obtain an entity (as node) that has some property.
-
-===== Data
-
-Two Service Offerings, which both match the query: https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/fc-service/-/tree/main/examples/queries/credentialSubject2[1], https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/fc-service/-/tree/main/examples/queries/serviceElasticSearch[2].
-
-[source,json]
-----
-{
-  "@id": "http://w3id.org/gaia-x/indiv#serviceElasticSearch.json",
-  "@type": "gx:ServiceOffering",
-  "ex:some_property": {
-    "ex:some_other_property": {
-      "@value": "ex:some_service",
-      "@type": "gx:ServiceOffering"
-    }
-  },
-  "gx:name": "Elastic Search DB"
-}
-
-...
-
-{
-  "@id": "ex:credentialSubject2",
-  "@type": "gx:ServiceOffering",
-  "ex:some_property": {
-    "@value": "http://ex.com/resource23",
-    "@type": "xsd:anyURI"
+    "type": "gx:Address",
+    "gx:countryCode": "DE",
+    "vcard:region": "Sachsen",
+    "vcard:locality": "Dresden",
+    "vcard:postal-code": "01069",
+    "vcard:street-address": "Pragerstraße 12"
   }
 }
 ----
 
 ===== Query
 
-[source,cypher]
+[source,sparql]
 ----
-MATCH (n)-[:some_property]->(m) RETURN n
+PREFIX gx:     <https://w3id.org/gaia-x/2511#>
+PREFIX schema: <https://schema.org/>
+PREFIX vcard:  <http://www.w3.org/2006/vcard/ns#>
+
+SELECT ?name ?countryCode ?region ?locality ?postalCode ?streetAddress WHERE {
+  <https://www.example.org/participants/test-issuer-2> a gx:LegalPerson ;
+    schema:name ?name ;
+    gx:legalAddress ?addr .
+  ?addr gx:countryCode      ?countryCode ;
+        vcard:locality      ?locality ;
+        vcard:postal-code   ?postalCode ;
+        vcard:street-address ?streetAddress .
+  OPTIONAL { ?addr vcard:region ?region . }
+}
 ----
 
 ===== Output
 
-----
-[{n={claimsGraphUri=[http://w3id.org/gaia-x/indiv#serviceElasticSearch.json]}},
- {n={claimsGraphUri=[http://ex.com/credentialSubject2]}}]
-----
+[options="header"]
+|===
+| ?name | ?countryCode | ?region | ?locality | ?postalCode | ?streetAddress
+| `"deltaDAO Dresden GmbH"` | `"DE"` | `"Sachsen"` | `"Dresden"` | `"01069"` | `"Pragerstraße 12"`
+|===
 
-==== Entities by Name
+==== Entity having a Property
 
-Return all entities having a given name.
+Obtain all Service Offerings that declare a `dependsOn` relationship to another service.
 
 ===== Data
 
-One Service Offering; see https://gitlab.com/gaia-x/data-infrastructure-federation-services/cat/fc-service/-/tree/main/examples/queries/credentialSubject2[file].
+Two Service Offerings: https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/credentialSubject2.jsonld[1] (`service-1`, has no `dependsOn`), and https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/serviceElasticSearch.jsonld[2] (`elasticsearch`, depends on `service-1`).
 
 [source,json]
 ----
 {
-  "@id": "http://w3id.org/gaia-x/indiv#serviceElasticSearch.json",
-  "@type": "gx:ServiceOffering",
-  ...
-  "gx:name": "Elastic Search DB"
+  "id": "https://www.example.org/service-offerings/elasticsearch",
+  "type": "gx:ServiceOffering",
+  "schema:name": "Elastic Search DB",
+  "gx:dependsOn": { "id": "https://www.example.org/service-offerings/service-1" }
+}
+
+...
+
+{
+  "id": "https://www.example.org/service-offerings/service-1",
+  "type": "gx:ServiceOffering",
+  "schema:name": "Example Compute Service"
 }
 ----
 
 ===== Query
 
-[source,cypher]
+[source,sparql]
 ----
-MATCH (n:ServiceOffering) WHERE n.name = "Elastic Search DB" RETURN n.uri LIMIT 25
+PREFIX gx: <https://w3id.org/gaia-x/2511#>
+
+SELECT ?dependent ?dependency WHERE {
+  ?dependent a gx:ServiceOffering ;
+             gx:dependsOn ?dependency .
+  ?dependency a gx:ServiceOffering .
+}
 ----
 
 ===== Output
 
+[options="header"]
+|===
+| ?dependent | ?dependency
+| `<.../service-offerings/elasticsearch>` | `<.../service-offerings/service-1>`
+|===
+
+==== Entities by Name
+
+Return all entities with a given `schema:name` value.
+
+===== Data
+
+One Service Offering; see https://github.com/eclipse-xfsc/federated-catalogue/blob/main/examples/queries/serviceElasticSearch.jsonld[serviceElasticSearch.jsonld].
+
+[source,json]
 ----
-[{n.uri=http://w3id.org/gaia-x/indiv#serviceElasticSearch.json}]
+{
+  "id": "https://www.example.org/service-offerings/elasticsearch",
+  "type": "gx:ServiceOffering",
+  "schema:name": "Elastic Search DB"
+}
 ----
 
-[[sparql_star_examples]]
-==== SPARQL-star Examples (Fuseki backend)
-
-The following examples show equivalent queries for the Fuseki backend using SPARQL-star syntax. These are sent via `POST /query` with `Content-Type: application/sparql-query`.
-
-===== All triples
-
-Retrieve all triples stored in the graph:
+===== Query
 
 [source,sparql]
 ----
-SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 100
+PREFIX schema: <https://schema.org/>
+
+SELECT ?entity WHERE {
+  ?entity schema:name "Elastic Search DB" .
+}
+LIMIT 25
 ----
 
-===== All claims with asset IRI
+===== Output
 
-Retrieve all claims together with the asset IRI they belong to, using RDF-star syntax.
-The `cred:credentialSubject` predicate is the Fuseki backend's internal annotation that records the source asset IRI for each triple — for Verifiable Credentials this is the `credentialSubject` IRI; for non-credential RDF assets (Turtle, N-Triples, RDF/XML, JSON-LD) it is the asset's `@id` or UUID URN assigned by `IriGenerator`:
+[options="header"]
+|===
+| ?entity
+| `<.../service-offerings/elasticsearch>`
+|===
+
+[[provenance_via_rdf_star]]
+==== Provenance via RDF-star
+
+The Fuseki backend annotates every extracted claim with the source asset IRI it was derived from, using the `cred:credentialSubject` predicate against an RDF-star quoted triple.
+For Verifiable Credentials this is the `credentialSubject` IRI; for non-credential RDF assets (Turtle, N-Triples, RDF/XML, JSON-LD) it is the asset's `@id` or the UUID URN assigned by `IriGenerator`.
+
+===== All claims with their source asset
 
 [source,sparql]
 ----
 PREFIX cred: <https://www.w3.org/2018/credentials#>
-SELECT ?s ?p ?o ?cs
-WHERE {
-  <<(?s ?p ?o)>> cred:credentialSubject ?cs
+
+SELECT ?s ?p ?o ?asset WHERE {
+  <<(?s ?p ?o)>> cred:credentialSubject ?asset .
 }
 LIMIT 100
 ----
 
-===== Claims for a specific asset IRI
-
-Retrieve all claims belonging to a specific asset, identified by its IRI.
-Works for both Verifiable Credentials and non-credential RDF assets:
+===== Claims belonging to a specific asset
 
 [source,sparql]
 ----
 PREFIX cred: <https://www.w3.org/2018/credentials#>
-SELECT ?s ?p ?o
-WHERE {
-  <<(?s ?p ?o)>> cred:credentialSubject <http://example.org/my-asset-iri>
+
+SELECT ?s ?p ?o WHERE {
+  <<(?s ?p ?o)>> cred:credentialSubject
+    <https://www.example.org/participants/test-issuer-1> .
 }
 ----
+
+[[opencypher_example]]
+==== Neo4j (openCypher) reference
+
+The Neo4j backend remains available; queries are sent to `POST /query` with `Content-Type: application/opencypher-query`.
+The example below is the openCypher equivalent of <<_all_nodes_and_relationships,All Nodes and Relationships>>.
+
+[source,cypher]
+----
+MATCH (m)-[relation]->(n) RETURN m, relation, n
+----
+
+Property names in the Neo4j projection are derived from the local part of each predicate IRI (e.g. `schema:name` → `name`, `gx:legalAddress` → `legalAddress` as edge label, `vcard:postal-code` → `postal-code`).
+The +claimsGraphUri+ property on each node links back to the asset IRI the claims were extracted from — the openCypher counterpart to `cred:credentialSubject` in <<provenance_via_rdf_star>>.

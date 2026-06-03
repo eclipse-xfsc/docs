@@ -11,6 +11,8 @@ ifndef::imagesdir[:imagesdir: ../../images]
 [[section-concepts]]
 == Cross-cutting Concepts
 
+This chapter collects the concerns that cut across the components introduced in <<section-building-block-view>>: how persistent data is backed up, how the catalogue logs, how trust frameworks are packaged and overlaid, how admin configuration is persisted, the admin-API mutation conventions, the input-parsing security posture, and the asset content-kind / type taxonomy that drives metadata enrichment.
+
 === Backup
 Backing up a running application is a basic administrative operation. The recommended runtime environment for the federated catalogue is Kubernetes. See the previous section for more information. Therefore, to back up the federated catalogue, well known tools can be used.
 
@@ -18,7 +20,7 @@ Data is persisted in the following components:
 
 * Federated Catalogue Server: Asset and Schema files (Filesystem)
 * Metadata Store: Asset and Schema metadata (PostgreSQL)
-* Graph store: Claims graph (Neo4j or Fuseki, depending on `graphstore.impl` configuration)
+* Graph store: Claims graph (Neo4j or Fuseki, depending on the configured backend)
 
 During the deployment it must be ensured that volumes are mounted to store the persistent data in the mentioned components.
 
@@ -79,21 +81,12 @@ Document the mapping inline with a pointer to what would un-block dropping it (t
 ==== Deploying Bundle Overlays
 
 A bundle overlay lets operators customise an existing bundle or add a new one at deployment time, without rebuilding the JAR.
-Set `FEDERATED_CATALOGUE_TRUST_FRAMEWORKS_OVERRIDE_PATH` (Spring property: `federated-catalogue.trust-frameworks.override-path`) to a directory mounted read-only into the container.
-The loader expects the layout `<override-path>/<bundle-id>/framework.yaml` (same as the classpath layout), with optional sibling `ontology.ttl` and `shapes.ttl` files.
+The operator points the catalogue at a read-only directory mounted into the container; its layout mirrors the classpath bundle layout (one sub-directory per bundle, containing the framework descriptor and optional ontology and shapes files).
 
-When the `id` in a filesystem `framework.yaml` matches a classpath bundle, the file is treated as an overlay: it only needs to declare `id` plus the fields to change.
-Nested maps merge recursively (filesystem wins per leaf key); lists and scalars replace wholesale when the overlay supplies them; sibling TTL files are inherited from the classpath bundle when the overlay directory omits them.
-A filesystem entry whose `id` has no classpath match is loaded as a brand-new bundle and must declare all mandatory fields.
-See ADR 10 for the full deep-merge rules.
-
-.Minimal overlay example — override the Trust Anchor URL for the Gaia-X compliance bundle
-[source,yaml]
-----
-id: gaia-x-2511
-properties:
-  trust_anchor_url: "https://did-server/api/trustAnchor/chain/file"
-----
+When the bundle identifier in a filesystem descriptor matches a classpath bundle, the file is treated as an overlay and only needs to declare the identifier plus the fields to change.
+Nested maps merge recursively (filesystem wins per leaf key); lists and scalars replace wholesale when the overlay supplies them; sibling ontology and shapes files are inherited from the classpath bundle when the overlay directory omits them.
+A filesystem entry whose identifier has no classpath match is loaded as a brand-new bundle and must declare all mandatory fields.
+See ADR 10 for the full deep-merge rules and the operator guide for the exact configuration surface.
 
 ==== Runtime Override Precedence
 
@@ -126,50 +119,24 @@ Gating base-class resolution is the most visible effect a toggle on a type-vocab
 [[_gxdch_loire_v2_compliance_service]]
 ==== Gaia-X Loire v2 Compliance Service
 
-The shipped Gaia-X compliance bundle (currently `gaia-x-2511`, release-tagged) wires the generic `JwtVcComplianceClient` (client type `jwt-vc-compliance`) to the canonical GXDCH HAProxy endpoint:
-
-[source,yaml]
-----
-properties:
-  client_type: jwt-vc-compliance
-  api_version: "v2"
-  service_url: "https://compliance.gaia-x.eu/v2"
-  compliance_path: "/api/credential-offers/standard-compliance"
-  timeout_seconds: 30
-----
-
-The client implementation is wire-shape-specific (POST a VP JWT, expect a VC JWT) but path-agnostic; the endpoint path is declared per bundle.
-This keeps the Gaia-X Loire / GXDCH endpoint as the reference deployment while allowing any future framework that adopts the same exchange to onboard as a new bundle, no new Java code required.
+The shipped Gaia-X compliance bundle wires a generic JWT-VC compliance client to the canonical GXDCH front-end.
+The client implementation is wire-shape-specific (it POSTs a Verifiable Presentation JWT and expects a Verifiable Credential JWT in response) but path-agnostic; the endpoint URL and request path are declared per bundle.
+This keeps the Gaia-X Loire / GXDCH endpoint as the reference deployment while allowing any future framework that adopts the same exchange to onboard as a new bundle, with no new Java code required.
 See ADR 12 for the wire-shape-in-bundle rationale.
 
-`https://compliance.gaia-x.eu/v2` is a HAProxy front-end that load-balances across the certified GXDCH operators.
-No per-operator configuration is required; the HAProxy URL is the single canonical address for Loire v2 compliance checks.
+The catalogue talks to the canonical Gaia-X compliance endpoint, which is a single URL maintained by the Gaia-X Digital Clearing House (GXDCH).
+How that endpoint distributes traffic across certified GXDCH operators is a concern of the GXDCH infrastructure itself (see the `loadbalancer/` configuration in the upstream https://gitlab.com/gaia-x/lab/gxdch[GXDCH repository]) and is intentionally out of scope here; from the catalogue's perspective there is one URL, carried in the bundle descriptor, and no per-operator configuration.
 
-**Request / response shape.**
-The catalogue POSTs a Loire-conformant Verifiable Presentation JWT to the configured `compliance_path` (in the Gaia-X bundle: `/api/credential-offers/standard-compliance`) appended to `service_url`, with a `vcid` query parameter carrying the VP JWT's `id` claim.
+**Request / response shape.** The catalogue POSTs a Loire-conformant Verifiable Presentation JWT to the configured compliance path appended to the service URL, carrying the VP JWT's `id` claim as a query parameter.
 The endpoint validates the VP against Loire 2511 criteria and returns a Compliance VC JWT signed by the selected operator.
 No authentication header is required — the GXDCH endpoint is publicly accessible.
+The OpenAPI specification of the compliance service is authoritative for the exact request and response shape.
 
-.Sketch of the exchange (non-normative; see `JwtVcComplianceClient` for the authoritative wire shape)
-[source,http]
-----
-POST https://compliance.gaia-x.eu/v2/api/credential-offers/standard-compliance?vcid=<asset-id-from-vp-jwt-id-claim>
-Content-Type: text/plain
-
-<Loire-conformant VP JWT as the raw request body>
-
-HTTP/1.1 201 Created
-Content-Type: text/plain
-
-<Compliance VC JWT as the raw response body>
-----
-
-The returned Compliance VC JWT is persisted as-is in `IssuedAttestation.rawCredential`.
+The returned Compliance VC JWT is persisted as-is alongside the asset.
 See ADR 17 for the storage rationale.
 
-**Test coverage.**
-Live GXDCH coverage requires a deployment stage whose signing certificate is reachable via a public `x5u` URL (the Trust Anchor Registry must be able to resolve the chain).
-BDD scenarios tagged `@uses.live-gxdch` are excluded from default CI; they run only in a dedicated Behave profile (`behave --tags=uses.live-gxdch`) against a QA stage with a resolvable certificate chain.
+**Test coverage.** Live GXDCH coverage requires a deployment stage whose signing certificate is reachable via a public `x5u` URL (the Trust Anchor Registry must be able to resolve the chain).
+The integration-test suite includes BDD scenarios that exercise the live path; they are excluded from default CI and run only against a QA stage with a resolvable certificate chain.
 
 === Admin Configuration Persistence
 
@@ -210,9 +177,9 @@ User-supplied content (assets, schemas, IRIs) is parsed only by hardened, sandbo
 [options="header",cols="1,2,2"]
 |===
 | Threat | Mitigation | Component
-| XXE / external DTD | `FEATURE_SECURE_PROCESSING` enabled; `ACCESS_EXTERNAL_DTD` and `ACCESS_EXTERNAL_SCHEMA` set to empty. | `XmlSchemaValidationStrategy`, XML parsers
-| SSRF via JSON `$ref` | `$ref` URI scheme allowlist: `https://` permitted; `file://`, `http://`, `ftp://`, `gopher://` rejected before schema load. | `JsonSchemaValidationStrategy`
-| SPARQL injection | IRIs validated by `requireSafeIri` before string-interpolation into SPARQL queries. | `SparqlGraphStore`
+| XXE / external DTD | JAXP secure-processing enabled; external-DTD and external-schema access disabled. | XML schema validator, XML parsers
+| SSRF via JSON `$ref` | `$ref` URI scheme allowlist: only `https://` is loaded; `file://`, `http://`, `ftp://`, and similar are rejected before schema load. | JSON schema validator
+| SPARQL injection | IRIs validated against a strict syntax check before string-interpolation into SPARQL queries. | SPARQL graph store
 |===
 
 Any new validator or store that accepts user-provided content must adopt the same posture. Hardening is enforced by tests: every new parser has at least one security-path test (malicious DTD, external `$ref`, unsafe IRI) alongside its happy-path tests.
@@ -241,16 +208,16 @@ NOTE: Enrichment eligibility is decided by `content_kind = NON_RDF` and `AssetTy
 The `MACHINE_READABLE` constraint means the payload is parseable (structured non-RDF or RDF); enrichment specifically attaches *graph-queryable* RDF claims on top of a payload that was not RDF at upload time, regardless of whether the payload was otherwise structured.
 
 **Metadata enrichment** is the process of attaching graph-queryable RDF triples to a non-RDF asset.
-An RDF payload is uploaded via `POST /assets` whose subject IRI matches an existing non-RDF asset.
+An RDF payload is uploaded against the IRI of an existing non-RDF asset.
 The service:
 
-. Parses the payload and requires at least one triple whose subject is the asset's IRI (otherwise HTTP 400).
-. Filters protected-namespace triples via `ProtectedNamespaceFilter`.
-. Replaces the asset's existing graph triples (`GraphStore.deleteClaims` → `addClaims`).
-. Persists the raw RDF payload to the `content` column on the **same `assets` row** as the non-RDF asset (`AssetStore.saveEnrichedContent`) — no new entity is created and no separate enrichment table is involved.
-Hibernate Envers records the prior state as a new revision in `assets_aud` with `changeComment = "Metadata enriched"`, so the version history of the asset includes each enrichment.
-Because the enrichment RDF lives on the asset row itself, the graph can be rebuilt from PostgreSQL at any time.
-. Returns HTTP 200; no new asset is created.
+. Parses the payload and requires at least one triple whose subject is the asset's IRI.
+. Filters out triples in protected namespaces.
+. Replaces the asset's existing graph triples.
+. Persists the raw RDF payload alongside the existing non-RDF asset (no new entity is created and no separate enrichment table is involved).
+The audit trail records each enrichment as a new revision, so the version history of the asset includes every enrichment, and the graph can be rebuilt from the relational store at any time.
 
-`HUMAN_READABLE` assets reject enrichment with HTTP 422. If the graph backend is disabled (`graphstore.impl=none`), enrichment fails with HTTP 503 — graph writes are mandatory for this path.
-The `content_kind` is **not changed** by enrichment, and each enrichment upload replaces the previous metadata entirely (overwrite semantics — no merge).
+`HUMAN_READABLE` assets reject enrichment.
+When the graph backend is disabled, enrichment is rejected as well — graph writes are mandatory for this path.
+The asset's content kind is not changed by enrichment, and each enrichment upload replaces the previous metadata entirely (overwrite semantics — no merge).
+The OpenAPI specification is authoritative for the exact HTTP status codes returned in each case.

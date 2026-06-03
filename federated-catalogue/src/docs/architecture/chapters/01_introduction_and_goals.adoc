@@ -15,15 +15,14 @@ This document gives a short overview of the architectural design decisions for t
 
 === Requirements Overview
 
-The requirements for implementing the Gaia-X Federated Catalogue are given in its specification documentfootnote:[Gaia-X Federation Services. Core Catalogue Features. 2021. https://www.gxfs.eu/download/1740/]. Individual requirements were changed during the implementation in mutual agreement, for reasons including the following:
+The requirements for implementing the Federated Catalogue originate in its specification documentfootnote:[Gaia-X Federation Services. Core Catalogue Features. 2021. https://www.gxfs.eu/download/1740/], published as part of the GXFS programme from which XFSC emerged.
+Individual requirements were refined during implementation in mutual agreement, for reasons including the following:
 
 * The specification of a requirement turned out to be unsatisfiable for conceptual or practical reasons.
 * The understanding of an underlying concept had evolved during the further work of the Gaia-X Technical Committee and its working groups after the original publication of the requirements specification.
 
-The catalogue specification has been updated with new requirements, identified by IDs starting with CAT-FR-*.
-While these requirements are not fully implemented yet, they are planned to be completed by 2026.
-The catalogue's architecture is designed to support the implementation of these new requirements.
-In cases of conflict, the newer requirements take precedence over the older ones.
+The catalogue specification has since been extended by a successor set of functional and non-functional requirements (identified, in the SRS, by IDs beginning with `CAT-FR-` and `CAT-NFR-`).
+The architecture is designed to support these requirements; where they conflict with the original specification, the newer requirements take precedence.
 
 For more details, refer to the document "Enhancement of the XFSC Federated Catalogue" footnote:[Enhancement of the XFSC Federated Catalogue. 2025. https://github.com/eclipse-xfsc/docs/blob/9a178c30f76610e5924fd72c39d259d6a8ae0461/federated-catalogue/src/docs/CAT%20Enhancement/CAT_Enhancement_Specifications%20v1.0.pdf].
 
@@ -36,11 +35,15 @@ Quality goals regarding, e.g., performance, safety, security, and standards conf
 [options="header",cols="1,2,2"]
 |===
 |Role/Name|Contact|Expectations
-| leader and implementation partners of the GXFS project | https://gxfs.eu/ | The implementation conforms to the requirements, i.e., the functionality behind the interfaces is implemented as specified, thus facilitating integration of the Federated Catalogue with other Federation Services.  The architecture facilitates this conformance by bridging between the high level of the requirements specification and concrete design and implementation choices.
+| Original specification authors (GXFS programme, 2021–2024) | https://gxfs.eu/ | The implementation conforms to the requirements, i.e., the functionality behind the interfaces is implemented as specified, thus facilitating integration of the Federated Catalogue with other Federation Services. The architecture facilitates this conformance by bridging between the high level of the requirements specification and concrete design and implementation choices.
 | Participants in a Gaia-X ecosystem | n/a | Participants can interact with a Catalogue as expected.
 |===
 
 === Assumptions
+
+NOTE: The assumptions below are **historical context** from the 2022 reference implementation, captured here so that present-day architecture choices remain understandable.
+Several of them no longer hold literally — Gaia-X has since matured (Loire 25.05 architecture, ICAM 24.07, 25.11 ontology), and the catalogue has generalised "Self-Description" to "Asset" and "Credential".
+Where a present-day statement contradicts an assumption below, the present-day statement (and the relevant ADR) wins.
 
 Since this project is conducted in an early stage of the Gaia-X development there is no experience how credentials (formerly called Self-Descriptions) will look like in practice. Therefore, several assumptions regarding their characteristics have to be made. These assumptions will be explained in this section.
 

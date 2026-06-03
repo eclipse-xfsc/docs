@@ -10,6 +10,14 @@ ifndef::imagesdir[:imagesdir: ../../images]
 
 [[section-quality-scenarios]]
 == Quality Requirements
-There is no additional description of the quality requirements, since there are specific quality scenarios in the specification document.
 
-The main quality requirements are scalability and maintainability.
+The detailed quality scenarios (performance targets, availability budgets, security posture, conformance criteria) are owned by the Software Requirements Specification and the successor "XFSC Federated Catalogue Enhancement" document; this chapter does not restate them.
+
+At the architectural level, two quality attributes drive the dominant trade-offs in the design:
+
+* **Scalability.** Read paths must scale horizontally (the graph store is a separate, replicable component; the catalogue itself is stateless behind its persistence layer).
+Write paths are serialised through the metadata store so consistency is enforced in one place.
+* **Maintainability.** The catalogue is a long-lived federation service.
+Decisions favour replaceability over coupling: pluggable graph backends (ADR 18), self-contained trust-framework bundles (ADR 10), and a wire-shape-agnostic compliance client (ADR 12 / ADR 17) all exist to let pieces of the system evolve independently.
+
+The remaining quality attributes (security, reliability, observability) are addressed by the cross-cutting concepts in chapter <<section-concepts>> and the relevant ADRs in chapter <<section-design-decisions>>.
