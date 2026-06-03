@@ -269,6 +269,25 @@ Additionally, five predefined task-specific composite roles are available:
 
 Participant and user management endpoints continue to use the legacy roles directly (Ro-MU-CA, Ro-MU-A, Ro-PA-A).
 
+===== User Management and the Keycloak Admin Console
+
+User management is governed by two distinct authorization layers:
+
+[options="header",cols="1,2,2"]
+|===
+| Layer | Authenticated identity | Required roles
+| Catalogue user/participant API (`/users`, `/participants`) | the catalogue's `federated-catalogue` Keycloak *service account* | `realm-management` roles held by the service account (`view-users`, `query-users`, `manage-users`)
+| Embedded Keycloak Admin Console (the admin UI's user-management iframe) | the *logged-in human user* | the same `realm-management` roles, held by the **user** directly
+|===
+
+The catalogue's own user-management endpoints are reached with the catalogue client roles above (`Ro-MU-CA`, `Ro-MU-A`, `Ro-PA-A`); the catalogue server then calls the Keycloak Admin API through its service account, which carries the `realm-management` roles.
+
+Note that `ADMIN_ALL` gates the `/admin/**` dashboard endpoints but **does not** authorize user- or participant-management — those require one of `Ro-MU-CA`, `Ro-MU-A`, or `Ro-PA-A` directly. `Ro-MU-CA` (Catalogue Administrator) is the composite that bundles `Ro-MU-A`, `Ro-PA-A`, `Ro-AS-A`, *and* `ADMIN_ALL`, so a Catalogue Administrator can drive both the dashboard and user management; a user holding only `ADMIN_ALL` is rejected from the user-management endpoints.
+
+The user-management page additionally embeds the Keycloak Admin Console in an iframe. That console authenticates as the human user, not the service account, so a user must hold the `realm-management` roles (`view-users`, `query-users`, `manage-users`) on `federated-catalogue-realm` to view or manage users through it.
+
+NOTE: The catalogue client roles (`Ro-MU-CA`, `Ro-MU-A`, `Ro-PA-A`) and the Keycloak `realm-management` roles are independent. Holding only a catalogue role authorizes the catalogue's user-management API but not the embedded Admin Console; the user sees an empty or forbidden console until granted the `realm-management` roles.
+
 ==== Core Services (fc-service-core)
 
 The Core Services receive calls from the service component and provide the building blocks to support the flows for the different operations.
