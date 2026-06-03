@@ -788,11 +788,16 @@ sequenceDiagram
 
 ==== Attaching a Provenance Credential
 
-Stores a W3C VC 2.0 JSON-LD or VC-JWT provenance credential against a specific asset version. The optional `?version=X` query parameter targets a historical version (1-based ordinal); omitting it targets the current version. The write does **not** produce a new Envers revision on the asset.
+Stores a W3C VC 2.0 JSON-LD or VC-JWT provenance credential against a specific asset version. The optional `?version=X` query parameter targets a historical version (1-based ordinal); omitting it targets the current version. Attaching a provenance credential does **not** advance the asset's version counter — the counter reflects distinct content hashes, not metadata or sub-resource events.
 
-`credentialSubject.id` in the VC must equal `{assetId}:v{N}` — any mismatch returns 400. VC 1.1 payloads and payloads using the CAT-internal namespace are also rejected with 400. A duplicate `credentialId` (VC `id` field) returns 409.
+Two W3C-PROV-O credential shapes are accepted:
 
-When a graph store is active, the corresponding PROV-O triple is written under the versioned asset IRI `{assetId}:v{N}` as a side-effect.
+* **Entity-centric** — `credentialSubject.id` is the versioned asset IRI itself, and PROV-O predicates describe the asset as the subject (e.g. `prov:wasGeneratedBy`, `prov:wasDerivedFrom`).
+* **Activity-centric** — `credentialSubject.id` is the activity's own IRI, and at least one PROV-O predicate (typically `prov:generated` or `prov:used`) points back at the versioned asset so the activity is reachable from it.
+
+Each shape is projected to the graph under the IRI of its own `credentialSubject`.
+The list of recognised PROV-O predicates and their accepted forms (compact or expanded) is documented in the OpenAPI specification.
+VC 1.1 payloads and payloads using the CAT-internal namespace are rejected with 400; a duplicate `credentialId` (VC `id` field) returns 409.
 
 [mermaid, width=2000]
 ....
@@ -1153,6 +1158,9 @@ When the graph store is disabled, queries are rejected with a "service unavailab
 
 Only read queries are allowed.
 Write queries (e.g., `CREATE`/`DELETE` in openCypher, `INSERT`/`DELETE` in SPARQL) are rejected.
+
+For SPARQL queries the response format is content-negotiated via the `Accept` header: the catalogue's own paginated envelope (`application/json`) remains the default, and the W3C SPARQL 1.1 Results JSON format (`application/sparql-results+json`) is offered as an alternative for SPARQL-tooling compatibility.
+Backends that cannot produce the standard format respond with HTTP 406 to the alternative request.
 
 [mermaid, width=2000]
 ....

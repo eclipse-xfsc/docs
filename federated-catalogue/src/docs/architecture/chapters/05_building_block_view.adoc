@@ -1049,6 +1049,10 @@ Key IRI-based operations:
 The `deleteAsset(hash)` and `changeLifeCycleStatus(hash, status)` methods are the deliberate exceptions — both remain hash-based to guarantee unambiguous single-row targeting.
 See ADR 7, Hash-Based Mutation Operations Exception. `deleteAsset` publishes an `AssetDeletedEvent` after the row deletion, triggering cascade cleanup of associated validation results and provenance credentials (see <<_validation_result_storage>>).
 
+In addition to the hash-based path, the asset store exposes `deleteByAssetId(id)` — an idempotent cascade keyed by the asset IRI. It removes the live row, its human-readable companion, and (via the same `AssetDeletedEvent`) the validation-result and provenance-credential rows attached to the asset. A second call against the same identifier resolves to a no-op so that demo scripts and integration test fixtures can reset state without environment teardown. Cross-participant access is gated on the live row's issuer when present; an unknown identifier always succeeds with `204` and reveals nothing about the catalogue's contents. The underlying audit log of past content revisions is preserved.
+
+The asset version counter is defined as the number of distinct content hashes observed across the entity's audit history. Saves that change non-content fields (linking a human-readable companion, lifecycle-status transitions, last-modified bookkeeping) reuse an existing hash and therefore do not advance the counter. This matches the SRS rule that linking a sub-resource to an asset must not produce a new asset version.
+
 The `IriGenerator` assigns IRIs before storage: it extracts IRIs from RDF content (`credentialSubject.id`, `@id`, ontology/shapes/vocabulary IRIs) or generates UUID URNs (RFC 4122) for non-RDF assets and as fallback. The `IriValidator` checks all assigned IRIs against supported formats (DIDs, UUID URNs, generic URNs, HTTP/HTTPS IRIs) — returning `true`/`false`. Callers decide how to handle invalid IRIs (fallback to UUID URN, or reject the request).
 
 Asset metadata is persisted in the relational metadata store.
@@ -1575,17 +1579,18 @@ Two content-retrieval endpoints serve the linked counterpart from either directi
 The linked asset IRI is surfaced in each side's metadata response under fields that identify the counterpart asset.
 The OpenAPI specification is authoritative for the exact paths, request bodies, and error contracts.
 
-Accepted content types for human-readable representations:
+Accepted content types for human-readable representations are governed by a configurable two-layer scheme:
 
-[options="header",cols="1,2"]
-|===
-| MIME type | Format
-| `application/pdf` | PDF
-| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | DOCX
-| `text/html` | HTML
-| `text/plain` | Plain text
-|===
+* an **allowlist** that admits broad MIME families typically used for human-facing attachments (textual formats, common office and document formats), and
+* a **denylist** that explicitly rejects scripting and active-content subtypes — `image/svg+xml`, JavaScript/ECMAScript/VBScript flavours, and similar — even when they would otherwise match the family allowlist.
 
+The same scheme is enforced for both `POST /assets/{mrId}/human-readable` and
+`PUT /assets/{mrId}/human-readable`.
+Validation is strict against the configured `Content-Type`
+header; unsupported or denylisted types are rejected with `400 Bad Request`.
+A missing
+`Content-Type` is treated as `application/octet-stream`, which is not accepted by default.
+The current default allowlist, denylist and the configuration keys that override them are documented in the OpenAPI specification.
 The allowlist is operator-configurable and is enforced for both the create and replace operations on the human-readable link endpoint.
 
 * PDF and DOCX cover the main document formats typically exchanged as human-facing attachments.
