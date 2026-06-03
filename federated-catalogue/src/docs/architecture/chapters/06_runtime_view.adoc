@@ -75,7 +75,7 @@ Anonymous users cannot request Participant information directly. Logged-in users
         API ->> + Parti: getParticipants(offset, limit)
         Parti -->> + PartiDao: search(offset, limit)
 
-        PartiDao -->> + Keycloak: GET /realms/gaia-x/groups
+        PartiDao -->> + Keycloak: GET /realms/federated-catalogue-realm/groups
         Keycloak -->> - PartiDao: Groups
 
         PartiDao ->> PartiDao: fromGroupRepo(group): ParticipantMetaData
@@ -107,7 +107,7 @@ sequenceDiagram
     Portal ->> + ParticipantController: GET /participants/{partID}
     ParticipantController ->> + ParticipantsService: getParticipant(partID)
     ParticipantsService ->> + ParticipantDao: select(partID)
-    ParticipantDao ->> + Keycloak: GET /realms/gaia-x/groups/{partID}
+    ParticipantDao ->> + Keycloak: GET /realms/federated-catalogue-realm/groups/{partID}
     Keycloak -->> - ParticipantDao: group
     ParticipantDao ->> ParticipantDao: fromGroupRepo(group): participant
     ParticipantDao -->> - ParticipantsService: participant
@@ -181,7 +181,7 @@ sequenceDiagram
     AssetStore -->> - ParticipantsService: [Ok, if no exception]
     ParticipantsService ->> + ParticipantDao: create(participant)
     ParticipantDao ->> ParticipantDao: toGroupRepo(participant):group
-    ParticipantDao ->> + Keycloak: POST /realms/gaia-x/groups
+    ParticipantDao ->> + Keycloak: POST /realms/federated-catalogue-realm/groups
     Keycloak -->> - ParticipantDao: 201 CREATED (ParticipantMetaData)
     ParticipantDao -->> - ParticipantsService: ParticipantMetaData
     ParticipantsService -->> - ParticipantController: ParticipantMetaData
@@ -221,7 +221,7 @@ sequenceDiagram
     ParticipantController ->> + ParticipantsService: updateParticipant (partID, asset)
     ParticipantsService ->> ParticipantsService: checkAccess [updated.participantId == user.participantId]
     ParticipantsService ->> + ParticipantDao: select(partID)
-    ParticipantDao ->> + Keycloak: GET /realms/gaia-x/groups/{partID}
+    ParticipantDao ->> + Keycloak: GET /realms/federated-catalogue-realm/groups/{partID}
     Keycloak -->> - ParticipantDao: group
     ParticipantDao ->> ParticipantDao: fromGroupRepo(group): Participant
     ParticipantDao -->> - ParticipantsService: Participant
@@ -233,7 +233,7 @@ sequenceDiagram
     AssetStore -->> - ParticipantsService: ''
     ParticipantsService --> + ParticipantDao: update(Participant)
     ParticipantDao -->> ParticipantDao: toGroupRepo(Participant): group
-    ParticipantDao ->> + Keycloak: PUT /realms/gaia-x/groups/{partID}{group}
+    ParticipantDao ->> + Keycloak: PUT /realms/federated-catalogue-realm/groups/{partID}{group}
     Keycloak -->> - ParticipantDao: 200 OK
     ParticipantDao -->> - ParticipantsService: updated
     ParticipantsService -->> - ParticipantController: updated
@@ -273,7 +273,7 @@ Notes:
         Parti ->> Parti: Ro-MU-A in User.Roles
         Parti ->> Parti: Participant = User.Participant
 
-        Parti ->> + Keycloak: GET /realms/gaia-x/groups/{partID}
+        Parti ->> + Keycloak: GET /realms/federated-catalogue-realm/groups/{partID}
         Keycloak -->> - Parti: Participant
 
         Parti ->> + AssetStore: getById(participantAssetId)
@@ -286,7 +286,7 @@ Notes:
         Note over AssetStore: AssetDeletedEvent is published before commit;<br/>ValidationResultCleanupListener cascades removal of validation results<br/>and ProvenanceCleanupListener cascades removal of provenance credentials —<br/>see _validation_result_storage.
         AssetStore -->> - Parti: Null
 
-        Parti ->> + Keycloak: DELETE /realms/gaia-x/groups/{partID}
+        Parti ->> + Keycloak: DELETE /realms/federated-catalogue-realm/groups/{partID}
         Keycloak -->> - Parti: Participant
 
         Parti -->> - API: Participant
@@ -315,7 +315,7 @@ sequenceDiagram
     API ->> + service: getUsers(partId)
     service ->> service: Ro-MU-CA|Ro-Pa-A|Ro-MU-A in User.Roles
     service -->> + dao: selectUsers(partId)
-    dao -->> + keycloak: GET /realms/gaia-x/groups/{partId}/users
+    dao -->> + keycloak: GET /realms/federated-catalogue-realm/groups/{partId}/users
     keycloak -->> - dao: UserRepresentations
     dao -->> - service: UserProfiles
     service -->> - API:UserProfiles
@@ -344,7 +344,7 @@ sequenceDiagram
     User ->> + API:GET /users/{userId}
     API ->> + service: getUser(userId)
     service -->> + dao: select(userId)
-    dao -->> + keycloak: GET /realms/gaia-x/users/{userId}
+    dao -->> + keycloak: GET /realms/federated-catalogue-realm/users/{userId}
     keycloak -->> - dao: UserRepresentation
     dao -->> - service: UserProfile
     service ->> service: (Ro-MU-CA in User.Roles) or <br>(Ro-Pa-A or Ro-MU-A in User.Roles and  RequestedUser.Participant == User.Participant)
@@ -376,7 +376,7 @@ sequenceDiagram
     API ->> + service: addUser(user)
     service ->> service: Ro-MU-CA|Ro-Pa-A|Ro-MU-A in User.Roles
     service -->> + dao: create(user)
-    dao -->> + keycloak: POST /realms/gaia-x/groups/{partId}/users
+    dao -->> + keycloak: POST /realms/federated-catalogue-realm/groups/{partId}/users
     keycloak -->> - dao: UserRepresentation
     dao -->> - service: UserProfile
     service -->> - API: UserProfile
@@ -411,7 +411,7 @@ sequenceDiagram
     service ->> service: Ro-MU-CA|Ro-Pa-A|Ro-MU-A in User.Roles
 
     service -->> + dao: select(userId)
-    dao -->> + keycloak: GET /realms/gaia-x/groups/{partId}/users/{id}
+    dao -->> + keycloak: GET /realms/federated-catalogue-realm/groups/{partId}/users/{id}
     keycloak -->> - dao: UserRepresentation
     dao -->> - service: UserProfile
 
@@ -420,7 +420,7 @@ sequenceDiagram
     end
 
     service ->> + dao: update(userId, user)
-    dao -->> + keycloak: PUT /realms/gaia-x/groups/{partId}/users
+    dao -->> + keycloak: PUT /realms/federated-catalogue-realm/groups/{partId}/users
     keycloak -->> - dao: UserRepresentation
 
     dao -->> - service: UserProfile
@@ -460,7 +460,7 @@ sequenceDiagram
     API ->> + service: updateUser(userId,user)
     service ->> service: Ro-MU-CA|Ro-Pa-A|Ro-MU-A in User.Roles
     service -->> + dao: select(userId)
-    dao -->> + keycloak: GET /realms/gaia-x/groups/{partId}/users/{id}
+    dao -->> + keycloak: GET /realms/federated-catalogue-realm/groups/{partId}/users/{id}
     keycloak -->> - dao: UserRepresentation
     dao -->> - service: UserProfile
 
@@ -469,7 +469,7 @@ sequenceDiagram
     end
 
     service ->> + dao: updateRoles(userId, roles)
-    dao -->> + keycloak: PUT /realms/gaia-x/groups/{partId}/users
+    dao -->> + keycloak: PUT /realms/federated-catalogue-realm/groups/{partId}/users
     keycloak -->> - dao: UserRepresentation
 
     dao -->> - service: UserProfile
@@ -499,7 +499,7 @@ sequenceDiagram
 
     API ->> + service: deleteUser(userId)
     service -->> + dao: select(userId)
-    dao -->> + keycloak: GET /realms/gaia-x/groups/{partId}/users/{id}
+    dao -->> + keycloak: GET /realms/federated-catalogue-realm/groups/{partId}/users/{id}
     keycloak -->> - dao: UserRepresentation
     dao -->> - service: UserProfile
 
@@ -508,7 +508,7 @@ sequenceDiagram
     end
 
     service ->> + dao: delete(userId)
-    dao -->> + keycloak: DELETE /realms/gaia-x/groups/{partId}/users/{id}
+    dao -->> + keycloak: DELETE /realms/federated-catalogue-realm/groups/{partId}/users/{id}
     keycloak -->> - dao: UserRepresentation
 
     dao -->> - service: UserProfile
