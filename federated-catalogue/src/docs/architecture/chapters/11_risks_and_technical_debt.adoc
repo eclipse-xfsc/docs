@@ -1,0 +1,197 @@
+:jbake-title: Risks and Technical Debt
+:jbake-type: page_toc
+:jbake-status: published
+:jbake-menu: arc42
+:jbake-order: 11
+:filename: /chapters/11_risks_and_technical_debt.adoc
+ifndef::imagesdir[:imagesdir: ../../images]
+
+:toc:
+
+[[section-technical-risks]]
+== Risks and Technical Debt
+
+Every system that goes into production carries known imperfections.
+Pretending otherwise would be dishonest; hiding them in an issue tracker would make them invisible to exactly the people who need to weigh them.
+This chapter is the architectural honesty page: it names the risks we know about and the technical debt we have consciously accepted, explains why each exists, and describes what would resolve it.
+
+Two reading hints help to interpret this chapter correctly:
+
+* **A listed risk is a managed risk.** The entries below are not defects discovered by accident — most of them are documented consequences of deliberate architecture decisions (see <<section-design-decisions>>). Naming a trade-off here means it was seen, weighed, and accepted with open eyes, usually with a defined path to close it.
+* **This chapter stays conceptual.** Day-to-day tracking of individual defects and work items lives in the project's issue tracker and backlog. This chapter describes the architectural themes behind them, so that a reader can judge the residual risk of the delivery without reading source code.
+
+The inventory was compiled from source-code markers, the consequence sections of the architecture decision records, and internal review findings.
+It is thorough but not provably complete; project management should cross-check it against its own risk register.
+
+=== Risks
+
+A _risk_ here means: a property of the current architecture that could cause harm — security exposure, data loss, operational surprise — if the surrounding assumptions stop holding.
+
+==== Trust and verification posture
+
+The catalogue's core promise is that the credentials it stores are trustworthy.
+The current verification pipeline delivers a deliberately staged version of that promise, and it is important to understand which stage a given deployment is on.
+
+In its default configuration, cryptographic signature verification is switched off (a deliberate decision, recorded as ADR 3, to keep development and evaluation deployments frictionless).
+A default deployment therefore proves that stored credentials are _well-formed and unmodified_, but not that they were _issued by who they claim_.
+Production federations are expected to enable the stricter verification profiles; the risk is that an operator ships the default without realising what it does and does not guarantee.
+
+Even with verification enabled, the trust chain is not yet checked to its full depth.
+Certificate chains embedded directly inside credentials are rejected rather than validated, and externally referenced trust anchors are currently checked for expiry only — full certification-path building and revocation checking are not yet implemented.
+In plain terms: the catalogue verifies that a signature is mathematically valid and that its certificate has not expired, but it would not currently notice a revoked certificate.
+
+Two further gaps complete this picture.
+First, fine-grained authorization (restricting operations by role scope and by participant) is designed (ADR 5) but not yet enforced everywhere, so the catalogue currently relies on the coarser access control of its surrounding infrastructure.
+Second, one verification path can fail _silently_ when an issuer publishes key material without algorithm information — the credential is then treated as unverifiable without a clear error, which makes misconfigurations on the issuer side hard to diagnose.
+
+Two quieter items round off the trust picture.
+The default configuration resolves issuer identities through a public, best-effort demonstration service on the open internet — perfectly adequate for evaluation, but a production federation must point identity resolution at infrastructure it controls, both for availability and because that service sits directly on the trust-establishment path.
+And the tamper-evidence seal on stored validation results deliberately excludes the free-text report portion — which has recently become the only place where an _infrastructure failure_ can be told apart from a genuine _non-conformance verdict_, so the seal currently protects every field except the most security-relevant distinction.
+
+[cols="3,4,3", options="header"]
+|===
+|Concern |Why it matters |Path to resolution
+
+|Signature verification off by default
+|Default deployments prove integrity, not authenticity
+|Operator awareness; stricter profiles exist and only need to be enabled (ADR 3)
+
+|Incomplete certificate-path and revocation checking
+|A revoked or improperly chained issuer certificate would not be detected
+|Implement full certification-path validation for both embedded and referenced trust material
+
+|Fine-grained authorization not yet enforced
+|Access control is coarser than the designed permission model
+|Complete the enforcement of the model designed in ADR 5
+
+|Silent failure on incomplete issuer key material
+|Issuer-side misconfiguration becomes hard to diagnose
+|Fail loudly with a descriptive error instead of skipping verification
+
+|Issuer-identity resolution defaults to a public demo service
+|An external dependency outside the federation's control sits on the trust path
+|Production profiles point at operator-controlled resolution infrastructure
+
+|Tamper-evidence seal on validation results excludes the report text
+|The unsealed portion is now the only discriminator between "service unreachable" and "asset non-conformant"
+|Extend the seal's coverage; needs a dedicated security review
+|===
+
+==== Credential-format migration
+
+The catalogue recently completed a hard cutover from the older Gaia-X credential generation ("Tagus") to the current one ("Loire") — the background and rationale are recorded in ADR 9.
+The cutover is deliberately non-graceful: credentials in the legacy format can no longer be uploaded and must be re-issued in the new format.
+This was the right architectural call (carrying two verification stacks indefinitely would have doubled the attack surface and the maintenance cost), but it transfers a real burden onto federation participants: as long as issuing tooling for the new format remains immature across the ecosystem, participants with legacy credentials face a migration effort that the catalogue itself cannot shorten.
+
+Two adjacent tensions deserve attention:
+
+* **Ecosystem generality.** The verification stack is currently strongest for Gaia-X-shaped credentials. If support for standards-conformant credentials from _other_ issuers were dropped entirely, the catalogue would become a Gaia-X-only component — which would contradict its original vision as a generic federation building block. This is a strategic boundary to watch, not a defect.
+* **Tooling friction at the standards edge.** The JSON-LD processing library in use rejects certain constructs that the new credential format legitimately produces, which can result in a presentation being accepted but yielding _no extracted claims_ — a silent partial failure. This is a known upstream limitation with a tracked workaround.
+
+==== Ontology and schema evolution
+
+The catalogue understands the semantics of stored credentials through a bundled ontology — a machine-readable vocabulary of the Gaia-X conceptual model.
+Two evolution risks follow from how this bundling works today (both rooted in the decisions of ADR 9 and ADR 16):
+
+* The bundled ontology is a hand-curated subset of the official one, trimmed to the constructs the resolution logic can process. If future spec releases start relying on constructs outside this subset, type resolution could degrade _silently_ — entries would stop being classified correctly without any error surfacing.
+* On an existing deployment, newly added ontology files are silently ignored at restart, because the schema store is only populated on first initialisation. An operator upgrading an installation could reasonably believe they have imported a new vocabulary when they have not.
+
+Both risks share the same character: nothing breaks visibly at the moment the assumption fails.
+The mitigation direction is therefore the same for both — turn silent degradation into loud, operator-visible signals.
+
+==== Graph-store operations
+
+The catalogue keeps its queryable knowledge graph in a pluggable backend, and the backend can be switched at runtime (ADR 18).
+This flexibility is valuable — it is what allows a federation to choose its graph technology — but it concentrates operational risk in the switching and rebuilding procedures:
+
+[cols="3,4,3", options="header"]
+|===
+|Concern |Why it matters |Path to resolution
+
+|Backend switch relies on a single pre-flight probe
+|A failed probe assumption could leave the service unable to start
+|Harden the probe; document a tested rollback procedure
+
+|Backend switch does not migrate data
+|The new store starts empty; a full rebuild from the primary store is required
+|Deliberate design (the primary metadata store remains the source of truth); operators need the rebuild step in their runbook
+
+|Enrichment metadata of non-semantic assets is not restored by a rebuild
+|At federation scale (hundreds of participants and assets), re-uploading enrichment data is significant manual effort
+|Extend the rebuild path to cover enrichment metadata, or persist it in the rebuildable store
+
+|Enrichment can duplicate managed structure
+|Users can hand-create metadata that overlaps with what the catalogue manages automatically, causing soft inconsistencies
+|Guard rails at the enrichment interface (ADR 15 describes the enrichment concept)
+
+|Repeated enrichment replaces rather than accumulates
+|A second enrichment of the same asset silently discards the first one's queryable metadata — a consequence of the graph store's replace-by-subject write model
+|Open product question: decide whether accumulate semantics are wanted, then either change the write model or document the replace behaviour prominently
+
+|Raw graph queries are read-only, but not procedure-filtered
+|Authenticated callers could invoke resource-intensive analytics procedures if optional backend plugins were installed (they are not, in the delivered configuration)
+|Procedure allow-listing as a hardening follow-up
+|===
+
+The common theme: the graph store is treated as a rebuildable projection of the primary metadata store — a sound architectural principle — but not every category of data has been brought under that principle yet.
+
+==== Ambiguous verification results
+
+One verification endpoint currently returns the same "nothing to verify" answer for two very different situations: _the requested item does not exist_ and _the item exists but carries no verifiable credentials_.
+A caller who mistypes an identifier receives a reassuring-looking result instead of an error.
+This is a small surface with an outsized trust impact — verification APIs, of all places, should never let a mistake masquerade as a pass.
+The resolution is straightforward (distinguish the two cases explicitly) and is tracked for an upcoming change.
+
+=== Technical Debt
+
+_Technical debt_ is the engineering equivalent of a mortgage: a shortcut taken deliberately to deliver value sooner, with the understanding that interest accrues until it is repaid.
+The entries below are ordered by theme, not severity; none of them endangers the correctness of the delivered functionality today, but each one makes some future change slower or riskier than it should be.
+
+==== Leftovers from the credential-stack migration
+
+The migration described in the risk section above (and in ADR 9) removed an entire family of signature libraries from the core service — but the surrounding tooling has not fully caught up:
+
+* Two auxiliary credential-signing tools (used for performance testing and local development) still reference the removed library family and need to be rewritten against the current formats, or retired.
+* Part of the test-fixture inventory labels plain, unsigned test data as if it were in the current secured format, which overstates the conformance coverage the test suite actually provides.
+* Fixture generation for the current format relies on a stopgap script, pending maturity of official issuing tooling.
+* A deprecated loading method is retained alongside its replacement and awaits removal.
+* Document caching for external resources uses an ad-hoc file store rather than the caching mechanism idiomatic to the JSON-LD tooling.
+
+None of this affects the production verification path; the debt lives in the periphery (tooling, fixtures, cleanup) and its interest rate is developer confusion.
+
+==== Incomplete abstractions
+
+Several extension points were built ahead of their first real second use — a common and usually cheap form of debt, with two caveats worth naming:
+
+* A strategy abstraction for routing different data-serialisation formats exists but has exactly one implementation and no routing logic; it currently adds indirection without adding flexibility. It should either gain its intended purpose or be inlined away.
+* Trust-framework bundles that declare validation capabilities the runtime does not support are registered _silently inactive_ — the operator gets no signal that a configured framework is doing nothing. As with the ontology risks above, the fix is to make the failure loud.
+* The administrative graph-rebuild path cannot yet re-index credentials secured in the current JWT-based format — a functional gap in an otherwise generic mechanism.
+* Some query languages are intentionally unsupported on some graph backends; these are documented feature gaps, not defects, but they constrain backend choice for federations with specific query needs.
+
+==== API-contract hygiene
+
+The published API specification has accumulated small mismatches against the implementation: response fields that are declared but never populated, nullability declarations that do not match reality, and endpoint documentation that describes behavioural changes only in shared schema definitions where clients are unlikely to look.
+Individually each is minor; collectively they erode the specification's authority as the contract between the catalogue and its integrators.
+
+A process observation belongs in the same theme: a behavioural change to a published endpoint can currently be merged with the specification updated but the architecture documentation untouched — there is no step that ties the two together.
+This chapter itself is part of the answer, but a lightweight definition-of-done rule ("API behaviour change ⇒ documentation sync") would address the root cause.
+
+Finally, one layering slip: wire-format constants are defined inside the verification domain layer, where transport concerns do not belong.
+It is a one-file cleanup, listed here because layering violations tend to multiply when the first one is tolerated.
+
+==== Test debt
+
+The test suite carries a handful of known soft spots: one disabled test awaiting a fix, one missing positive-path coverage area in asset storage, accuracy tests that pre-date the final claim-parsing implementation, an exploratory test slated for deletion, and test-purpose tags whose names no longer match how the suites are actually partitioned.
+The tag cleanup matters more than it sounds: misleading suite labels cause engineers to run the wrong safety net before merging.
+
+==== Dependency and operational currency
+
+Third-party dependencies with high-severity published vulnerabilities need remediation, and the major-version upgrades of the underlying framework and database have been consciously deferred to a dedicated effort rather than bundled into feature work — a scheduling decision, recorded in the backlog, that keeps upgrade risk contained but must not be deferred indefinitely.
+In the same category, a periodic re-validation sweep for stored data against current schemas is architecturally prepared but not yet wired into the default production configuration.
+When that sweep _is_ enabled, one subtlety in its work-sharing design deserves an operator's attention: the sweep partitions its workload by a _configured_ instance count, not by the number of instances actually running — if a deployment runs fewer replicas than configured, the surplus partitions are silently never revalidated.
+Aligning the configured count with reality (or deriving it automatically) closes the gap.
+
+=== Relation to the decisions chapter
+
+Some entries a reader might expect here are deliberately _not_ listed, because they are scope decisions rather than risks: functionality that was consciously descoped or deferred within the project window (including one refactoring that was cancelled precisely _because_ it was judged too risky to execute late in the delivery) is recorded where arc42 wants decisions to live — in <<section-design-decisions>> and the project's decision log.
+The rule of thumb: if it was a choice, it is documented as a decision; if it is a consequence we live with, it is listed here.
