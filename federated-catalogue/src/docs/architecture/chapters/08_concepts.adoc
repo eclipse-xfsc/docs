@@ -122,7 +122,7 @@ Gating base-class resolution is the most visible effect a toggle on a type-vocab
 The shipped Gaia-X compliance bundle wires a generic JWT-VC compliance client to the canonical GXDCH front-end.
 The client implementation is wire-shape-specific (it POSTs a Verifiable Presentation JWT and expects a Verifiable Credential JWT in response) but path-agnostic; the endpoint URL and request path are declared per bundle.
 This keeps the Gaia-X Loire / GXDCH endpoint as the reference deployment while allowing any future framework that adopts the same exchange to onboard as a new bundle, with no new Java code required.
-See ADR 12 for the wire-shape-in-bundle rationale.
+See ADR 19 for the wire-shape-in-bundle rationale.
 
 The catalogue talks to the canonical Gaia-X compliance endpoint, which is a single URL maintained by the Gaia-X Digital Clearing House (GXDCH).
 How that endpoint distributes traffic across certified GXDCH operators is a concern of the GXDCH infrastructure itself (see the `loadbalancer/` configuration in the upstream https://gitlab.com/gaia-x/lab/gxdch[GXDCH repository]) and is intentionally out of scope here; from the catalogue's perspective there is one URL, carried in the bundle descriptor, and no per-operator configuration.

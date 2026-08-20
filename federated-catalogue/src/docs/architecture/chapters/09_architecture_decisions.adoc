@@ -459,7 +459,7 @@ It cannot be extracted from the ontology, because trust-framework ontologies do 
 There is no `gx:CatalogueBaseClass` superclass, no `isBaseClass` annotation property, no skos scheme that groups Participant + ServiceOffering + Resource together.
 The 213 named OWL classes are structurally indistinguishable from one another as far as the model is concerned — Address, Endpoint, RegistrationNumber and Participant are peers in the type hierarchy.
 * `skos:inScheme` exists on most classes but is purely topical categorisation (legal, storage, compute, …); the `gx:participant` scheme happens to contain only Participant, but `gx:legal` contains 37 classes that are not base classes.
-* JSON-Schema-based frameworks (e.g. UNTP, see ADR 12) have no OWL ontology at all; the base-class list is declared explicitly under `types:` for the same reason.
+* JSON-Schema-based frameworks (e.g. UNTP) have no OWL ontology at all; the base-class list is declared explicitly under `types:` for the same reason.
 
 Where base-class-ness *is* encoded — outside the ontology — is in three operative places: the conformity body's issuer behaviour (which `credentialSubject.type` values it actually mints as top-level VCs), the framework's architecture/compliance specification prose, and sample VPs published by the conformity body.
 None of these are machine-readable from the catalogue's perspective.
