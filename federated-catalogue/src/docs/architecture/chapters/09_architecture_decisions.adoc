@@ -257,7 +257,7 @@ The Federated Catalogue initially supported both generations in parallel (namesp
 
 [IMPORTANT]
 ====
-**Migration impact:** This is not a graceful deprecation. The `FormatDetector` rejects any credential that uses the VC 1.1 context URI (`\https://www.w3.org/2018/credentials/v1`) or lacks a VC 2.0 context URI. Linked Data proofs are rejected with `"Linked Data proof verification is not supported. Use JWT or Enveloped Credential format."` Existing Tagus-era credentials cannot be uploaded to the catalogue — they must be re-issued in Loire/VC 2.0 format.
+**Migration impact:** This is not a graceful deprecation — but it is not a hard rejection either. The `CredentialFormatDetector` no longer recognises the VC 1.1 context URI (`\https://www.w3.org/2018/credentials/v1`): a Tagus-era credential matches no credential format and is routed to the non-credential ingestion path, where it is **silently downgraded to unverified generic RDF data** — no signature verification, no credential metadata, no Gaia-X type resolution. The uploader receives no signal that the payload was not treated as a credential. To regain verified status, Tagus-era credentials must be re-issued in Loire/VC 2.0 format. Payloads that *do* match a credential format but carry a Linked Data proof are rejected with `"Linked Data proof verification is not supported. Use JWT or Enveloped Credential format."`
 ====
 
 The ontology bundle contains only Loire 2511 files:
