@@ -265,8 +265,8 @@ The ontology bundle contains only Loire 2511 files:
 [cols="1,2",options="header"]
 |===
 | Type | File
-| OWL ontology | `gx-2511.ttl`
-| SHACL shapes | `gx-2511-shapes.ttl`
+| OWL ontology | `ontology.ttl`
+| SHACL shapes | `shapes.ttl`
 |===
 
 Type URI configuration uses a single namespace:
@@ -293,7 +293,7 @@ The official Gaia-X 2511 OWL file from the registryfootnote:[https://registry.la
 1. **Test suite noise:** Thousands of warnings bury real errors in log output, making test failures difficult to diagnose.
 2. **Apparent hangs:** The volume of log output slows test execution to the point where the suite appears to hang.
 
-The catalogue's `SchemaStoreImpl` only needs the **class hierarchy** (`owl:Class` declarations and `rdfs:subClassOf` relationships) for type resolution via `ClaimValidator.getSubjectType()`. Data properties, annotation properties, OWL restrictions, and enum individuals are not queried by the type resolution SPARQL and are therefore unnecessary.
+The catalogue's `SchemaStoreImpl` only needs the **class hierarchy** (`owl:Class` declarations and `rdfs:subClassOf` relationships) for type resolution via the SPARQL subclass walk in `ClaimValidator.resolveSubjectBaseClass()`. Data properties, annotation properties, OWL restrictions, and enum individuals are not queried by the type resolution SPARQL and are therefore unnecessary.
 
 The bundled `gx-2511.ttl` is a **stripped extraction** containing only:
 
@@ -307,7 +307,7 @@ The following constructs are intentionally omitted:
 |===
 | Omitted construct | Effect
 | Enum individuals (~7,000) | Carry the invalid double-`#` IRIs. Not used by type resolution.
-| `owl:Restriction` blank nodes | Property cardinality/value constraints on instances. Not queried by `getSubjectType()`.
+| `owl:Restriction` blank nodes | Property cardinality/value constraints on instances. Not queried by `ClaimValidator.resolveSubjectBaseClass()`.
 | `owl:equivalentClass` | Would cause the OWL reasoner to infer mutual `rdfs:subClassOf`. Currently absent from the 2511 core hierarchy.
 | `owl:intersectionOf` / `owl:unionOf` | Inferred subclass from set-theoretic definitions. Not present in 2511.
 | Data/annotation properties | Not queried by type resolution.
@@ -323,7 +323,7 @@ curl -o /tmp/gx-full.ttl https://registry.lab.gaia-x.eu/development/owl/2511
 # 2. Run the extraction script (from the federated-catalogue repo root)
 python3 fc-tools/extract-ontology-hierarchy.py \
     --input  /tmp/gx-full.ttl \
-    --output fc-service-core/src/main/resources/defaultschema/ontology/gx-2511.ttl \
+    --output fc-service-core/src/main/resources/trustframeworks/gaia-x-2511/ontology.ttl \
     --ontology-iri https://w3id.org/gaia-x/2511 \
     --source-url https://registry.lab.gaia-x.eu/development/owl/2511
 
@@ -677,7 +677,7 @@ The runtime status endpoint (`GET /admin/graph-database`) reports the active bac
 
 * All adapters are constructed at boot regardless of which one is active, which trades a small amount of bean wiring against the ability to swap without restart. The lazy driver pattern keeps boot resilient: an inactive Neo4j or Fuseki being down is not a startup failure — it is simply not contacted until the operator switches to it.
 
-* The pre-flight probe is the only thing standing between an operator and an unbootable next start: persisting a preference for an unreachable backend would trap the cold-boot resolution path. Rejecting unreachable targets at the API level is therefore mandatory, not advisory.
+* The pre-flight probe is what stands between an operator and a silent-degradation state, not an unbootable one: persisting a preference for a backend that later becomes unavailable does not block the next cold boot. Instead, the routing store falls back to the no-op backend with at most a log warning, and queries silently return nothing until an operator notices. Rejecting unreachable targets at the API level is therefore mandatory, not advisory.
 
 * A backend switch leaves the new store empty (it has its own claim graph, independent of the previous backend). The `rebuildNeeded` signal in the status response makes this state explicit so the admin UI can surface a single-click rebuild via the existing `GraphRebuildService` path. No data is migrated between backends — the metadata store is the source of truth, and the graph is a derived index per ADR-level discussions of the rebuild contract.
 === ADR 19: Runtime override of per-bundle external client identifiers
