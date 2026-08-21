@@ -42,7 +42,7 @@ In plain terms: a revoked issuer certificate would currently go unnoticed.
 * **Participant-scoped authorization is designed but not yet enforced.** Role-based access control is enforced within the service itself; the designed permission model (ADR 5) goes further, and the additional restriction of operations to the participant they belong to is not yet enforced everywhere.
 * **Incomplete issuer key material produces unhelpful errors.** When an issuer publishes incomplete key material, one verification path skips the affected keys with only debug-level logging and ends in a generic "no matching key" error that does not name the root cause — issuer-side misconfigurations become hard to diagnose.
 * **Identity resolution defaults to a public demo service.** The default configuration resolves issuer identities through a public, best-effort demonstration service on the open internet — adequate for evaluation, but a production federation must point identity resolution at infrastructure it controls, both for availability and because that service sits directly on the trust-establishment path.
-* **The tamper-evidence seal has a blind spot.** The seal on stored validation results deliberately excludes the free-text report portion — which has recently become the only place where an _infrastructure failure_ can be told apart from a genuine _non-conformance verdict_, so the seal currently protects every field except the most security-relevant distinction.
+* **The tamper-evidence seal has a narrower blind spot.** The distinction between an _infrastructure failure_ and a genuine _non-conformance verdict_ is now carried in a structured part of the stored result that the seal covers, so that discriminator is tamper-evident. The seal still excludes the general free-text report portion used for detailed diagnostics, which remains unprotected.
 
 [cols="3,4,3", options="header"]
 |===
@@ -68,9 +68,9 @@ In plain terms: a revoked issuer certificate would currently go unnoticed.
 |An external dependency outside the federation's control sits on the trust path
 |The override mechanism exists (a local resolver); no shipped profile uses it yet — operators must configure it deliberately
 
-|Tamper-evidence seal on validation results excludes the report text
-|The unsealed portion is now the only discriminator between "service unreachable" and "asset non-conformant"
-|Extend the seal's coverage; needs a dedicated security review
+|Tamper-evidence seal on validation results excludes the free-text report
+|The infrastructure-failure vs. non-conformance discriminator is now sealed; the general free-text diagnostic detail is not
+|Extend the seal to cover the remaining free-text report; needs a dedicated security review
 |===
 
 ==== Credential-format migration

@@ -1119,6 +1119,7 @@ classDiagram
         +conforms: boolean
         +validatedAt: Instant
         +report: String
+        +failureCategory: String
         +contentHash: String
         +graphSyncStatus: GraphSyncStatus
         +createdAt: Instant
@@ -1133,14 +1134,15 @@ Each validation-result record carries:
 * the validator family (SHACL, JSON Schema, XML Schema, or trust-framework compliance);
 * a conformance flag and, on failure, the serialised validation report;
 * the validation timestamp (caller-supplied, distinguishing the validation event from the row's insertion time);
-* a content hash over the core fields to support tamper detection;
-* a graph-projection status indicating whether the row was successfully mirrored into the graph store as `fcmeta:` triples on first store.
+* for a trust-framework compliance check that could not reach a verdict (the trust service was unreachable or timed out), a failure category distinguishing that outcome from an actual non-conformance verdict; null for schema validations and for compliance checks that did produce a verdict;
+* a content hash over the core fields — including the failure category, when present — computed by `ValidationResultHasher` (SHA-256 over the RFC 8785 canonical JSON representation) to support tamper detection;
+* a graph-projection status indicating whether the row was mirrored into the graph store as `fcmeta:` triples (`SYNCED`/`FAILED`), or deliberately excluded from projection because the row is not itself a claim about an asset (`EXCLUDED` — used for failure-category audit entries, so that a graph rebuild cannot reintroduce the ambiguity between "service unreachable" and "asset non-compliant").
 
 The IRI column is indexed for efficient lookup by asset identifier.
 The OpenAPI specification is authoritative for the REST endpoints (paginated retrieval per asset, and single-record retrieval by surrogate identifier).
 
-After a graph backend reset, the rebuilder re-projects all validation result records as `fcmeta:` triples from the relational store, restoring graph state without re-running verification.
-Rows whose projection succeeds are marked synced; rows whose projection fails are marked accordingly for retry.
+After a graph backend reset, the rebuilder re-projects `fcmeta:` triples from the relational store for every validation result row except those marked `EXCLUDED`, restoring graph state without re-running verification.
+Rows whose projection succeeds are marked synced; rows whose projection fails are marked accordingly for retry; `EXCLUDED` rows are skipped and counted separately, since they were never meant to be projected.
 
 **Asset deletion cascade:** When an asset is deleted, `AssetStoreImpl` publishes an `AssetDeletedEvent`.
 Two `@TransactionalEventListener(BEFORE_COMMIT)` consumers run inside the same transaction as the asset deletion:
