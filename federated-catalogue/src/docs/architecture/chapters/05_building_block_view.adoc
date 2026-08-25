@@ -700,9 +700,11 @@ Validation is delegated to a list of `ValidationStrategy` implementations select
 |===
 | Strategy | Applicable asset types | `validator_type`
 | `ShaclValidationStrategy` | JSON-LD, Turtle, N-Triples, RDF/XML, Loire JWT | `SHACL`
-| `JsonSchemaValidationStrategy` | JSON (non-RDF) | `JSON_SCHEMA`
-| `XmlSchemaValidationStrategy` | XML | `XML_SCHEMA`
+| `JsonSchemaValidationStrategy` | JSON (non-RDF), and RDF assets serialised as JSON-LD | `JSON_SCHEMA`
+| `XmlSchemaValidationStrategy` | XML (non-RDF), and RDF assets serialised as RDF/XML | `XML_SCHEMA`
 |===
+
+Applicability follows SRS §3.1.6: a JSON Schema applies to any JSON-formatted asset (plain non-RDF JSON, or RDF serialised as JSON-LD); an XML Schema applies to any XML-formatted asset (plain non-RDF XML, or RDF serialised as RDF/XML). Turtle and N-Triples remain SHACL-only. An RDF asset in one of these two serialisations can therefore be validated by SHACL and a non-RDF schema in the same request.
 
 `ShaclValidationStrategy` evaluates SHACL constraints directly via the TopBraid SHACL engine — the same engine invoked by `SchemaValidationServiceImpl` on the upload verification path.
 Both paths run the engine in-line on the request thread.
