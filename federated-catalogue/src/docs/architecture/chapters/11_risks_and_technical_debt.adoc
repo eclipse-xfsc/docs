@@ -150,7 +150,6 @@ The migration described in the risk section above (and in ADR 9) removed an enti
 
 * Two auxiliary credential-signing tools (used for performance testing and local development) still reference the removed library family and need to be rewritten against the current formats, or retired.
 * Fixture generation for the current format relies on a stopgap script, pending maturity of official issuing tooling.
-* A deprecated loading method is retained alongside its replacement and awaits removal.
 * Document caching for external resources uses an ad-hoc file store rather than the caching mechanism idiomatic to the JSON-LD tooling.
 
 None of this affects the production verification path; the debt lives in the periphery (tooling, fixtures, cleanup) and its interest rate is developer confusion.
@@ -170,8 +169,8 @@ Three themes:
 Individually each is minor; collectively they erode the specification's authority as the contract between the catalogue and its integrators.
 * **No documentation-sync step in the process.** A behavioural change to a published endpoint can currently be merged with the specification updated but the architecture documentation untouched — nothing ties the two together.
 This chapter itself is part of the answer, but a lightweight definition-of-done rule ("API behaviour change ⇒ documentation sync") would address the root cause.
-* **One layering slip.** Wire-format constants are defined inside the verification domain layer, where transport concerns do not belong.
-A one-file cleanup, listed here because layering violations tend to multiply when the first one is tolerated.
+* **Layering slips.** Wire-format constants are defined inside the verification domain layer, where transport concerns do not belong.
+A cleanup spanning more than one file, listed here because layering violations tend to multiply when the first one is tolerated.
 
 ==== Test debt
 
@@ -180,7 +179,6 @@ The test suite carries a handful of known soft spots:
 * Several disabled tests awaiting fixes — some annotated as disabled (one at class level, silencing a whole group), and some commented out entirely, which does not even show up as "skipped" in test reports.
 * One missing positive-path coverage area in asset storage (a dated marker where the graph-storage success scenario was never added).
 * Accuracy tests that pre-date the final claim-parsing implementation.
-* An exploratory test slated for deletion.
 * Test-purpose tags whose names no longer match how the suites are actually partitioned — this one matters more than it sounds, because misleading suite labels cause engineers to run the wrong safety net before merging.
 
 ==== Dependency and operational currency
