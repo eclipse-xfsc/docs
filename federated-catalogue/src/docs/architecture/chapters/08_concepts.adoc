@@ -176,6 +176,7 @@ The earlier `PUT /…/enabled?enabled=<bool>` shape used during initial admin-AP
 
 User-supplied content (assets, schemas, IRIs) is parsed only by hardened, sandboxed parsers. The catalogue treats every external byte sequence as untrusted, regardless of the caller's role. The same posture is applied uniformly across validators and graph stores.
 
+[[_input_parsing_security]]
 [options="header",cols="1,2,2"]
 |===
 | Threat | Mitigation | Component
