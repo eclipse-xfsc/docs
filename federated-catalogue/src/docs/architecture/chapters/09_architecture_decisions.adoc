@@ -740,3 +740,7 @@ Without it, the clear operation would have been protected only by the catch-all 
 
 * Operators receive an immediate-effect channel for endpoint reconfiguration that does not require touching deployment artefacts.
 The deployment-time filesystem overlay (ADR 10) remains the right tool for bundle-shape changes (roles, ontology, validation type) and for shipping a new bundle; the DB override path is reserved for the external identifiers of an already-registered bundle.
+
+* The write path turns an admin PATCH directly into the URL the catalogue's compliance client dials, which is a server-side-request-forgery surface: an admin session (compromised or CSRF'd) could otherwise repoint the client at an internal host or the cloud-metadata address.
+`serviceUrl` and `trustAnchorUrl` are therefore validated at the boundary — only `https://` is accepted, and IP-literal hosts in the loopback, link-local, private, or multicast ranges are rejected — mirroring the scheme-allowlist approach already used for JSON `$ref` (see the threat table in the Concepts chapter).
+This is a syntactic check: symbolic hostnames are not resolved at validation time, so it does not defend against DNS rebinding between validation and the outbound call; that class of defense belongs at the network layer (egress policy), not at this boundary.

@@ -99,6 +99,8 @@ The registry continues to serve role resolution and bundle discovery; it does no
 The DB-override layer is for administrators changing endpoint identifiers without redeployment.
 The filesystem overlay remains the right tool for bundle-shape changes (roles, ontology, validation type) and for shipping a new bundle.
 
+Because this write path turns an admin PATCH directly into the URL the catalogue's compliance client dials, `serviceUrl` and `trustAnchorUrl` are validated at the boundary: only `https://` is accepted, and IP-literal hosts in the loopback, link-local (including the cloud-metadata address), private, or multicast ranges are rejected. Symbolic hostnames are not resolved at validation time — see the threat table in <<_input_parsing_security>> for the rationale and its scope limit.
+
 ==== Type Dispatch and the OWL Toggle
 
 When a credential arrives, the catalogue maps its `credentialSubject` type URI to a trust-framework base class through three tiers, in order:
@@ -180,6 +182,7 @@ User-supplied content (assets, schemas, IRIs) is parsed only by hardened, sandbo
 | XXE / external DTD | JAXP secure-processing enabled; external-DTD and external-schema access disabled. | XML schema validator, XML parsers
 | SSRF via JSON `$ref` | `$ref` URI scheme allowlist: only `https://` is loaded; `file://`, `http://`, `ftp://`, and similar are rejected before schema load. | JSON schema validator
 | SPARQL injection | IRIs validated against a strict syntax check before string-interpolation into SPARQL queries. | SPARQL graph store
+| SSRF via admin-configured bundle override URL | Scheme allowlist (`https://` only) plus rejection of loopback, link-local (including the cloud-metadata address), private, and multicast IP literals; symbolic hostnames are accepted without DNS resolution — this is a syntactic check, not a DNS-rebinding-proof network guard. | `TrustFrameworkBundleUrlValidator`, admin bundle-config PATCH
 |===
 
 Any new validator or store that accepts user-provided content must adopt the same posture. Hardening is enforced by tests: every new parser has at least one security-path test (malicious DTD, external `$ref`, unsafe IRI) alongside its happy-path tests.
