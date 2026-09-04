@@ -190,6 +190,14 @@ Three items:
 * **Sweep work-sharing assumes a fixed replica count.** When the sweep _is_ enabled, it partitions its workload by a _configured_ instance count, not by the number of instances actually running — a deployment running fewer replicas than configured silently never revalidates the surplus partitions.
 Aligning the configured count with reality (or deriving it automatically) closes the gap.
 
+==== Documentation and deployment hygiene
+
+Three further items, unrelated to each other but sharing the same character — nothing wrong today, but each one erodes a promise the documentation or deployment tooling implicitly makes:
+
+* **Database image versions diverge between delivery paths.** The graph-database image version referenced by the packaged deployment chart and the version referenced by the hand-maintained deployment manifests have drifted apart. The two paths should track the same version, or the divergence should be a deliberate, documented choice rather than an accident of separate maintenance.
+* **Several architecture diagrams have no editable source.** A number of diagrams in the architecture documentation exist only as rasterised images; without the original diagram source, updating one means redrawing it from scratch rather than editing an existing file.
+* **Development-only credentials are stored in cleartext.** The deployment chart's default configuration values contain development-only credentials in cleartext — convenient for a throwaway evaluation deployment, but a template an operator could copy into something more permanent without noticing what it carries forward.
+
 === Relation to the decisions chapter
 
 Some entries a reader might expect here are deliberately _not_ listed, because they are scope decisions rather than risks: functionality that was consciously descoped or deferred within the project window (including one refactoring that was cancelled precisely _because_ it was judged too risky to execute late in the delivery) is recorded in the project's decision log — and, where architecturally significant, as an ADR in <<section-design-decisions>>.
