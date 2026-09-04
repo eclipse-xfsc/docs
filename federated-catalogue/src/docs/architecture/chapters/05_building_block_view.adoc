@@ -57,8 +57,8 @@ The components are
 | Catalogue | Main component, implementing the core catalogue functionality.
 | Authentication | External component implementing the authentication flow and user management.
 | Graph-DB | Graph database, holding all claims contained in active credentials. The Graph database is responsible for executing semantic search queries.
-| File Store | The File Store is a blob storage. It holds credential files, Schema files, and non-RDF assets. This includes historical versions of credentials and Schemas. Non-RDF assets are stored in a dedicated File Store instance, separate from schema and context caches.
-| Metadata Store | Store for metadata on assets (credentials, Schemas, and non-RDF files) stored in the File Store.
+| File Store | The File Store is a blob storage. It holds Schema files and non-RDF assets, including historical versions of Schemas. Credential (RDF) content lives in the Metadata Store instead — see below. Non-RDF assets are stored in a dedicated File Store instance, separate from schema and context caches.
+| Metadata Store | Store for metadata on assets (credentials, Schemas, and non-RDF files). Credential (RDF) content is kept in the Metadata Store itself (a raw-content column); Schema and non-RDF file bytes are stored in the File Store.
 |===
 
 ==== Catalogue
@@ -85,9 +85,9 @@ An alternative implementation would be Lissifootnote:[https://lissi.id/[Lissi - 
 
 The graph database holds the claims of possibly verified, active RDF assets. In strict configuration mode, claims of credentials that fail verification are not added to the graph database. Claims of Deprecated, Expired or Revoked assets will be deleted from the Graph database.
 
-The Graph Database can be considered as a kind of search index. The single source of truth are the active credentials, stored in the File Store. This means at any point in time the Graph database can be rebuilt from scratch by reimporting the claims of the credentials. This allows the following:
+The Graph Database can be considered as a kind of search index. The single source of truth are the active credentials, stored in the Metadata Store. This means at any point in time the Graph database can be rebuilt from scratch by reimporting the claims of the credentials. This allows the following:
 
-. **Backup**: An explicit backup of the Graph database is not needed. Backing up the asset files (located in the File Storage) and the metadata (located in the Metadata Store) is sufficient to allow the rebuild of the Graph Database.
+. **Backup**: An explicit backup of the Graph database is not needed. Backing up the Metadata Store (which holds credential content directly, plus all asset metadata) and the non-RDF asset File Store is sufficient to allow the rebuild of the Graph Database.
 
 . **Scalability**: Querying the Graph database might be the most critical part regarding performance. Therefore, the Graph Database can be replicated in the future by multiple, independent instances. Since there are no strict consistency requirements, changes in the Graph can be applied independently. In the control flow, all write operations on assets pass the Metadata Store. Therefore, the consistency can be enforced by that database.
 
@@ -145,7 +145,7 @@ Queries must use SPARQL-star syntax (RDF 1.2 `<<( )>>` syntax).
 Results are shuffled unless the query contains an `ORDER BY` clause.
 
 ==== File Store
-The File Store is responsible to persist all file based content submitted to the catalogue. These are credentials (Verifiable Presentations or standalone Verifiable Credentials), Schemas, and non-RDF assets.
+The File Store is responsible to persist non-RDF file based content submitted to the catalogue: Schemas and non-RDF assets. Credentials (Verifiable Presentations or standalone Verifiable Credentials) are not persisted here — their content is kept in the Metadata Store instead.
 
 Non-RDF assets are stored in a dedicated File Store instance, kept separate from schema definitions and context caches for operational clarity.
 In production the asset-store location must be explicitly configured; the application fails to start if it is missing.
@@ -197,7 +197,7 @@ a| Responsible for:
 NOTE: Non-RDF schemas (JSON Schema, XML Schema) bypass the Schema Store entirely. They are routed by the `SchemasService` directly to the File Store and Metadata Store without RDF parsing or graph integration.
 
 | Validator Cache | Component to store cached public keys. The keys were checked and validated when they were retrieved. To avoid expired public keys in the cache the deprecation date is regularly checked.
-| Asset Store | Storing and retrieving of credential files and non-RDF assets, and handling their lifecycle, versioning, and provenance. Assets are stored in the File Store, whereas metadata is kept in the Metadata Store. Non-RDF assets bypass verification and graph storage. Provenance credentials (W3C VC JSON-LD or VC-JWT) are stored append-only in a dedicated `provenance_credentials` table via the `ProvenanceService`; the table is not Envers-audited, so provenance writes never produce a new asset revision.
+| Asset Store | Storing and retrieving of credential files and non-RDF assets, and handling their lifecycle, versioning, and provenance. Credential (RDF) bytes are kept in the Metadata Store's raw-content column; only non-RDF asset bytes go to the File Store. Non-RDF assets bypass verification and graph storage. Provenance credentials (W3C VC JSON-LD or VC-JWT) are stored append-only in a dedicated `provenance_credentials` table via the `ProvenanceService`; the table is not Envers-audited, so provenance writes never produce a new asset revision.
 | RDF Detector | Classifies uploaded content as RDF or non-RDF based on a configurable MIME type allowlist and content inspection. For `application/json`, the detector checks for a JSON-LD `@context` key to distinguish JSON-LD (RDF) from plain JSON (non-RDF). Note that `application/schema+json` (JSON Schema) and `application/xml` (XSD) are always classified as non-RDF — even though they are schema formats, they are not RDF and do not enter the RDF verification pipeline.
 | Asset Upload Service | Orchestrates the dual-path upload flow: extracts request data, delegates to `RdfDetector` for classification, then routes to either the verification pipeline (RDF) or direct asset storage (non-RDF).
 | Asset Link Service | Manages bidirectional links between machine-readable (RDF) assets and human-readable representations (e.g., PDF, DOCX). Link metadata is stored directly on the `assets` table via an `asset_type` column and a `linked_asset_id` FK; supplementary `fcmeta:hasHumanReadable` / `fcmeta:hasMachineReadable` RDF triples are written to the graph DB.
@@ -995,7 +995,7 @@ public interface GraphStore {
 
 The Asset Store is responsible for storing credential files (whole files, not individual VCs), non-RDF assets, and their metadata.
 
-For **credentials (RDF)**, the store first saves the metadata in the Metadata Store, then adds claims to the Graph database, and finally stores the file in the File Store. A transaction ensures that the stored data is consistent.
+For **credentials (RDF)**, the store saves the metadata — including the raw JSON-LD body in the raw-content column — in the Metadata Store, then adds claims to the Graph database. No File Store write occurs for RDF credentials; the content is served back directly from that column. A transaction ensures that the stored data is consistent.
 
 For **non-RDF assets**, the store skips verification and graph interaction entirely. It stores metadata in the Metadata Store (with `content_type`, `file_size`, and `original_filename`), writes the raw bytes to the asset File Store, and assigns an IRI via the `IriGenerator` (typically a UUID URN per RFC 4122, e.g., `urn:uuid:...`).
 
@@ -1119,6 +1119,7 @@ classDiagram
         +conforms: boolean
         +validatedAt: Instant
         +report: String
+        +failureCategory: String
         +contentHash: String
         +graphSyncStatus: GraphSyncStatus
         +createdAt: Instant
@@ -1133,14 +1134,15 @@ Each validation-result record carries:
 * the validator family (SHACL, JSON Schema, XML Schema, or trust-framework compliance);
 * a conformance flag and, on failure, the serialised validation report;
 * the validation timestamp (caller-supplied, distinguishing the validation event from the row's insertion time);
-* a content hash over the core fields to support tamper detection;
-* a graph-projection status indicating whether the row was successfully mirrored into the graph store as `fcmeta:` triples on first store.
+* for a trust-framework compliance check that could not reach a verdict (the trust service was unreachable or timed out), a failure category distinguishing that outcome from an actual non-conformance verdict; null for schema validations and for compliance checks that did produce a verdict;
+* a content hash over the core fields — including the failure category, when present — computed by `ValidationResultHasher` (SHA-256 over the RFC 8785 canonical JSON representation) to support tamper detection;
+* a graph-projection status indicating whether the row was mirrored into the graph store as `fcmeta:` triples (`SYNCED`/`FAILED`), or deliberately excluded from projection because the row is not itself a claim about an asset (`EXCLUDED` — used for failure-category audit entries, so that a graph rebuild cannot reintroduce the ambiguity between "service unreachable" and "asset non-compliant").
 
 The IRI column is indexed for efficient lookup by asset identifier.
 The OpenAPI specification is authoritative for the REST endpoints (paginated retrieval per asset, and single-record retrieval by surrogate identifier).
 
-After a graph backend reset, the rebuilder re-projects all validation result records as `fcmeta:` triples from the relational store, restoring graph state without re-running verification.
-Rows whose projection succeeds are marked synced; rows whose projection fails are marked accordingly for retry.
+After a graph backend reset, the rebuilder re-projects `fcmeta:` triples from the relational store for every validation result row except those marked `EXCLUDED`, restoring graph state without re-running verification.
+Rows whose projection succeeds are marked synced; rows whose projection fails are marked accordingly for retry; `EXCLUDED` rows are skipped and counted separately, since they were never meant to be projected.
 
 **Asset deletion cascade:** When an asset is deleted, `AssetStoreImpl` publishes an `AssetDeletedEvent`.
 Two `@TransactionalEventListener(BEFORE_COMMIT)` consumers run inside the same transaction as the asset deletion:
@@ -1648,7 +1650,7 @@ The OpenAPI specification is authoritative for the endpoint paths, request bodie
 |===
 | Service | Implements | Endpoints
 | `AdminDashboardService` | `AdminApiDelegate` | `GET /admin/me` (access check), `GET /admin/stats` (metrics), `GET /admin/health` (component health), `GET /admin/keycloak-url`
-| `TrustFrameworkAdminService` | `TrustFrameworkAdminApiDelegate` | List, toggle, and update trust frameworks; checks live connectivity per framework on list
+| `TrustFrameworkAdminService` | `TrustFrameworkAdminApiDelegate` | List trust framework families with their bundles; toggle family enablement, per-bundle external client identifiers, and per-base-class enablement within a bundle — all via `PATCH` (`application/merge-patch+json`)
 | `SchemaValidationAdminService` | `SchemaValidationAdminApiDelegate` | List schema modules (SHACL, JSON Schema, XML Schema, OWL) with toggle and schema counts; toggle each module on/off; expose the per-ontology subclass contribution to each registered base class for the OWL module. SHACL, JSON Schema, and XML Schema toggles are enforced by on-demand validation (`POST /assets/validate`) via `AssetValidationService` and return `400 module_disabled:<MODULE>` when off; in upload verification only SHACL is consulted, with the same error contract. The OWL toggle gates the runtime composite-ontology subclass walk in `CredentialIngestionStrategy.resolveBaseClass` (see ADR 16)
 | `GraphDatabaseAdminService` | `GraphDatabaseAdminApiDelegate` | `GET /admin/graph-database` returns the active backend, connection state, claim count, and a `rebuildNeeded` flag with the `rdfAssetCount` that a rebuild would re-index. `POST /admin/graph-database/switch` pre-flights the target backend via `GraphStoreProbe` (Bolt for Neo4j, HTTP for Fuseki, 3 s budget each), performs the live in-process swap via `RoutingGraphStore.setActive(...)`, and only on a successful swap persists the choice to `admin_config[graphstore.preferred.backend]` — so a failed swap cannot strand a stale preference for the next cold boot. The change is observable on the next call with no JVM restart. Unreachable targets and backends with no registered adapter are both rejected with `400 Bad Request` before any state change.
 |===
