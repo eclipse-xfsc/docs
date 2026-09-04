@@ -777,7 +777,7 @@ Option 1 is rejected rather than adopted as an interim workaround: it would have
 **Consequences:** Deployments that need credential-asserted roles cannot obtain them yet; all other role and permission behaviour is unaffected.
 Because the design places the whole mechanism in identity-provider configuration rather than in the catalogue, resuming the work is a configuration task and not a development one.
 
-**Reactivation trigger:** The identity provider's OpenID4VP and OpenID4VCI support reaching supported, non-experimental, in-core status.
+**Reactivation trigger:** Re-evaluation is triggered by whichever of the following occurs first: the identity provider reaching general availability of OpenID4VP presentation verification as a supported, non-experimental, in-core feature, with re-evaluation to follow within eight weeks of that release; or a fixed calendar checkpoint of 2026-10-31, so that reactivation does not depend solely on tracking an upstream release.
 
 ==== Support for the Earlier Credential Generation — Discontinued
 
