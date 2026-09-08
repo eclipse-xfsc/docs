@@ -17,6 +17,7 @@ ADRs may reference each other (and are sometimes superseded by later ones); the 
 
 NOTE: ADR numbers 11 through 14 are intentionally absent: they were drafted as exploratory options for the bundle/profile design but were superseded by ADR 10 (Trust Framework Bundles) before being recorded as decisions.
 The numbering gap is preserved to keep stable references to the surviving ADRs (10, 15, …) intact.
+For the same reason a number is assigned when a decision is recorded in this chapter, not when it was taken: a later-numbered ADR may therefore carry an earlier decision date, and a number already published is never reassigned.
 
 === ADR 1: Monolithic vs. Microservices
 **Context:** Are the subcomponents implemented as separate micro-services or are they integrated into a single service.
@@ -680,6 +681,7 @@ The runtime status endpoint (`GET /admin/graph-database`) reports the active bac
 * The pre-flight probe is the only thing standing between an operator and an unbootable next start: persisting a preference for an unreachable backend would trap the cold-boot resolution path. Rejecting unreachable targets at the API level is therefore mandatory, not advisory.
 
 * A backend switch leaves the new store empty (it has its own claim graph, independent of the previous backend). The `rebuildNeeded` signal in the status response makes this state explicit so the admin UI can surface a single-click rebuild via the existing `GraphRebuildService` path. No data is migrated between backends — the metadata store is the source of truth, and the graph is a derived index per ADR-level discussions of the rebuild contract.
+
 === ADR 19: Runtime override of per-bundle external client identifiers
 
 **Related:** ADR 10, ADR 16, ADR 17, ADR 18.
@@ -744,3 +746,139 @@ The deployment-time filesystem overlay (ADR 10) remains the right tool for bundl
 * The write path turns an admin PATCH directly into the URL the catalogue's compliance client dials, which is a server-side-request-forgery surface: an admin session (compromised or CSRF'd) could otherwise repoint the client at an internal host or the cloud-metadata address.
 `serviceUrl` and `trustAnchorUrl` are therefore validated at the boundary — only `https://` is accepted, and IP-literal hosts in the loopback, link-local, private, or multicast ranges are rejected — mirroring the scheme-allowlist approach already used for JSON `$ref` (see the threat table in the Concepts chapter).
 This is a syntactic check: symbolic hostnames are not resolved at validation time, so it does not defend against DNS rebinding between validation and the outbound call; that class of defense belongs at the network layer (egress policy), not at this boundary.
+
+=== ADR 21: Asset Version Counter Semantics and PROV-O Predicate Set
+
+**Related:** ADR 7, ADR 10, ADR 22.
+
+**Context:** The catalogue couples three things that need to evolve together: the asset version counter, the shape of a provenance credential's `credentialSubject`, and the predicate vocabulary that the relational provenance store recognises.
+
+Two empirical findings drove this decision.
+
+. *Sub-resource attachments inflated the version counter.*
+The counter was implemented as a raw count of audit revisions on the live asset row.
+Any save on that row produced a revision — including a save that only recorded the association to a human-readable companion after it was attached, or the bookkeeping mutation produced by last-modified auditing.
+The asset's externally visible "version" therefore advanced every time a participant linked a companion file, in direct conflict with the rule that linking a sub-resource is not a content revision and must not produce a new asset version.
+
+. *The provenance endpoint accepted only an entity-centric four-predicate subset of PROV-O.*
+The endpoint required `credentialSubject` to carry exactly one of `prov:wasGeneratedBy`, `prov:wasDerivedFrom`, `prov:wasAttributedTo`, `prov:wasRevisionOf`.
+Activity- and agent-side predicates that are idiomatic in W3C PROV-O (`prov:used`, `prov:generated`, `prov:wasAssociatedWith`, `prov:actedOnBehalfOf`) were rejected, and a credential could not carry more than one recognised predicate on the same subject.
+
+**Decision:** Three changes are taken together.
+
+*Version-counter semantics.* The asset version counter is defined as the number of distinct content hashes observed across the entity's audit history.
+Revisions that share a hash with a newer revision represent non-content mutations (linkage, lifecycle status, last-modified bookkeeping) and collapse to a single content version.
+The version list endpoint and the "fetch version N" endpoint apply the same deduplication so that ordinals stay stable across non-content saves.
+Ordinals are assigned by position over the deduplicated history, so they are stable only against non-content saves; a content save that re-introduces earlier content renumbers the entries below it (see the revert case under Consequences).
+Audit rows on the underlying persistence store are kept as-is; the change is isolated to the query layer that surfaces "versions" to clients.
+
+*Provenance predicate set.* The recognised PROV-O predicate set on `credentialSubject` is extended with `prov:generated`, `prov:used`, `prov:wasAssociatedWith`, `prov:actedOnBehalfOf` in addition to the existing four.
+Both compact (`prov:X`) and expanded (`http://www.w3.org/ns/prov#X`) forms are accepted.
+A credential may carry several recognised predicates on a single `credentialSubject`; every recognised predicate is projected to the graph store as its own triple under the versioned subject IRI, while the first predicate in document order becomes the primary relational type discriminator.
+The relational provenance-type discriminator is extended to cover the four added predicates.
+These eight are the set recognised as of this decision, not the current total: ADR 22 extends it further to carry activity-centric provenance.
+
+*Cascade delete by asset IRI.* An idempotent endpoint removes every live row, every linked human-readable companion, and every provenance credential associated with an asset identified by its IRI.
+The pre-existing hash-based delete remains in place per the documented IRI-vs-hash exception for delete semantics (see ADR 7).
+
+**Consequences:**
+
+The version counter no longer drifts when a participant attaches companion files, retracts a linkage, or repeatedly toggles lifecycle status.
+Clients that previously observed the counter as an event count must adapt; the public API contract now defines the counter as a content-revision count.
+
+A content-equivalent revert does not add a version, but it does move the reverted content to the head of the history.
+If a participant uploads hash H1, then H2, then re-uploads H1, the version count stays at two: H1 becomes version two and is reported as the live current version, H2 becomes version one, and the revision that collapses away is the earlier H1.
+Because ordinals are positional over the deduplicated history, this renumbers an entry that a client may already have cited — H2 was version two before the revert and is version one after it.
+This is the intended trade-off for the counter — it tracks distinct content, not the number of upload events — but the renumbering it implies for already-issued ordinals is not, and is treated as a defect to be resolved separately rather than as settled behaviour.
+A participant who needs to distinguish "two upload events that happened to produce the same content" from "one upload event" must inspect the underlying audit history through a tooling channel rather than the public version endpoint.
+
+Cascade-delete by asset IRI preserves the underlying audit history rather than purging the audit table.
+Compliance- or forensics-driven reconstruction of an asset's lifetime remains possible after the public-facing cascade has been executed; data-subject-erasure obligations that demand audit-row removal are out of scope and require a separate decision.
+
+The provenance graph projection becomes richer: an activity-centric credential that lists `prov:used`, `prov:generated`, and `prov:wasAssociatedWith` on the same subject now projects three triples rooted at the versioned asset IRI rather than being rejected.
+Discovery queries that traverse those predicates run directly against the graph store.
+
+This decision left two limitations open:
+
+* The relational store records a single provenance type per credential row, treating the first recognised predicate as primary.
+Filtering by a non-primary predicate must go through the graph store, not the relational provenance list endpoint.
+This limitation still holds.
+
+* The credential subject IRI was validated to equal the versioned asset IRI.
+Activities expressed as first-class subjects with their own IRI — the W3C PROV-O idiom in which an Activity links back to the asset via `prov:used` / `prov:generated` — were not accepted as the credential subject under this decision.
+ADR 22 is the successor decision that lifted this restriction: activity-centric credential subjects are accepted, and an activity IRI is admitted as the graph subject when the credential declares `prov:generated` or `prov:used` pointing at the targeted asset.
+
+=== ADR 22: W3C PROV-O Provenance Model and Version-Neutral Sub-resource Linking
+
+**Related:** ADR 6, ADR 7, ADR 15, ADR 17, ADR 18, ADR 21.
+
+**Context:** The catalogue must let a user attach provenance assertions to an asset version, expressed and independently verifiable as W3C Verifiable Credentials in JSON-LD, and the act of linking such an assertion must not create a new version of the asset.
+
+The initial implementation modelled provenance as a narrow, entity-centric projection: each provenance credential contributed exactly one relation, chosen from a small fixed set of entity-centric PROV-O properties, attached to the asset-version entity.
+Any further structure the credential carried — agents, organizations, delegation, timestamps, activity identities — was discarded, whether it was stated alongside that relation or nested beneath it.
+This surface could not represent **activity-centric** provenance, where the credential's subject is a `prov:Activity` with its own identity, its responsible agent, the entities it used and generated, and links to the activities that informed it.
+Nor could it record more than one lifecycle event against the same asset version.
+In effect the provenance surface was a few-valued metadata facet on an entity, not the PROV-O graph it purported to be.
+
+Two forces made this inadequate:
+
+1. Real lifecycle narratives are naturally a sequence of independently-signed activity credentials — one party authors a version, another approves it, a third publishes the next version — each attributing responsibility to a distinct agent.
+Collapsing each to a single entity relation erases the accountability chain that is the point of recording provenance.
+
+2. Asset versioning was coupled to sub-resource attachment: linking any sub-resource (a human-readable rendering, a provenance credential) advanced the asset's version.
+"Version" therefore drifted from "a distinct machine-readable representation" toward "an event count", directly contradicting the requirement that linking provenance not create a new version.
+ADR 21 fixed the counter semantics; this decision fixes the model the counter was distorting.
+
+Three options were considered:
+
+1. **Keep the narrow entity-centric facet.** Simplest, and adequate for coarse "this version was derived from that one" statements.
+Rejected: it misrepresents the advertised capability, blocks activity-centric responsibility chains, and forces integrators to encode distinct lifecycle events as colliding relations on one entity.
+
+2. **Enforce full W3C PROV-CONSTRAINTS.** Model-complete, but disproportionate.
+The value is in accepting and faithfully projecting the provenance idioms actually used, not in validating the entire constraint theory.
+Rejected as out of scope.
+
+3. **Accept both entity-centric and activity-centric provenance credentials, project the PROV-O relations they state, and decouple versioning from sub-resource linking (chosen).**
+
+**Decision:** Provenance is modelled in W3C PROV-O.
+A provenance credential may present its subject either as the asset-version entity carrying entity-centric relations, or as a `prov:Activity` with its own identity, its associated agent, the entities it used and generated, delegation of responsibility, temporal information, and links to prior activities that informed it.
+The catalogue projects every relation the credential states on its subject rather than collapsing them to a single one, so agents, delegation, timestamps and activity chaining become queryable instead of being dropped.
+The projection is a flat star of triples rooted at the credential subject: each recognised predicate stated on the subject yields one triple, and a predicate whose value is an object node contributes that node's identifier only — statements nested beneath it are not walked and do not reach the graph.
+Provenance that is meant to be queryable must therefore be stated as a relation on the credential subject, not nested inside another relation's value; a chain of independently-signed credentials, each with its own subject, is the idiom the model is built around.
+To carry activity-centric provenance the recognised set is extended beyond the relations of ADR 21 with `prov:wasInformedBy` for activity chaining and `prov:startedAtTime` / `prov:endedAtTime` for temporal bounds, together with the RDF class declaration (`rdf:type`) that identifies the subject as an activity.
+Vocabulary outside PROV-O and the RDF class declaration is not part of this decision.
+
+Asset versioning is decoupled from sub-resource linking: attaching a provenance credential or a human-readable representation to an asset version does **not** create a new asset version.
+A new version corresponds to a new machine-readable representation of the asset.
+
+**Rationale:**
+
+* PROV-O is the authoritative W3C vocabulary for provenance.
+Aligning to it makes catalogue provenance interoperable with the wider RDF and PROV tooling ecosystem and lets an asset's lifecycle be recorded as a chain of independently-signed, independently-verifiable credentials, each carrying its own accountability.
+
+* Activity-centric modelling is what makes the responsibility chain explicit: an activity credential names who did what, when, and — where the delegation is stated as a relation on the credential subject — on whose behalf, information that a single entity-to-entity relation cannot carry.
+Entity-centric statements remain accepted for the simple derivation case, so the model is additive rather than a replacement.
+
+* Decoupling versioning from linking satisfies the requirement literally: provenance and versioning assertions are linked to the asset without the act of linking altering the asset's version identity.
+This also restores a stable, predictable meaning of "version" for downstream consumers.
+
+**Consequences:**
+
+* The projected provenance graph is richer and larger than the previous few-valued facet.
+A deployment that expects many entities each with several lifecycle activities should size its graph store accordingly and should not assume provenance is a bounded, per-entity annotation.
+
+* Version semantics change observably.
+Consumers that previously inferred a version increment from a sub-resource attachment must adapt; this is a behavioural break and must be called out in release notes.
+
+* Signature and trust-framework verification of provenance credentials remain a separate, configuration-gated concern (see ADR 3).
+This decision governs the provenance **data model** and its graph projection, not the trust posture under which credentials are accepted.
+
+* Provenance is recorded through the explicit provenance-authoring action; it is not auto-emitted as a side effect of every catalogue write.
+Automatic emission of provenance for lifecycle events, if later desired, is an additive extension that does not change this model.
+
+* The flat-star projection is a deliberate limit, and it is observable: an issuer who nests a delegation or an organization inside another relation's value sees the enclosing relation projected and the nested statements silently absent, with no error at write time.
+Recording that structure requires restating it as relations on the credential subject, or issuing a further credential whose subject is the nested resource.
+Walking nested structures, and signalling unprojected content back to the issuer, are additive extensions that this decision does not take.
+
+* Because activities are projected as first-class graph subjects, provenance discovery relies on traversing activity relations rather than reading a single property off the entity.
+Query examples that demonstrate the discovery pattern belong in the query appendix, not in this decision.
