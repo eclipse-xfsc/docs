@@ -669,7 +669,7 @@ Reversing this order would let a swap failure strand a preference for a backend 
 On cold boot the active backend is resolved as: persisted preference → deployment-time bootstrap configuration → no-op fallback.
 Each adapter opens its driver lazily on first use, so an unreachable inactive backend does not block startup.
 
-The runtime status endpoint (`GET /admin/graph-database`) reports the active backend, connectivity, claim count, and a `rebuildNeeded` flag with `rdfAssetCount`. The flag is true when the active store holds no claims but active RDF assets exist in storage — the typical state after a backend switch — and points the operator to the existing `POST /admin/graph/rebuild` endpoint, which repopulates the active backend from the metadata store.
+The runtime status endpoint (`GET /admin/graph-database`) reports the active backend, connectivity, claim count, and a `rebuildNeeded` flag with `rebuildableAssetCount`, the number of assets a rebuild would re-index. The flag is true when the active store holds no claims but assets carrying indexable content exist in storage — the typical state after a backend switch — and points the operator to the existing `POST /admin/graph/rebuild` endpoint, which repopulates the active backend from the metadata store.
 
 **Consequences:**
 
