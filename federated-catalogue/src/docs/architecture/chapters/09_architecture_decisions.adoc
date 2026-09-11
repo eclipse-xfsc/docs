@@ -747,6 +747,79 @@ The deployment-time filesystem overlay (ADR 10) remains the right tool for bundl
 `serviceUrl` and `trustAnchorUrl` are therefore validated at the boundary — only `https://` is accepted, and IP-literal hosts in the loopback, link-local, private, or multicast ranges are rejected — mirroring the scheme-allowlist approach already used for JSON `$ref` (see the threat table in the Concepts chapter).
 This is a syntactic check: symbolic hostnames are not resolved at validation time, so it does not defend against DNS rebinding between validation and the outbound call; that class of defense belongs at the network layer (egress policy), not at this boundary.
 
+=== ADR 20: Scope adjustments to delivered functionality
+
+**Related:** ADR 5, ADR 9, ADR 18.
+
+**Context:** Three adjustments taken during delivery changed what the catalogue ships relative to the specified functionality: one requirement is deferred behind the maturity of an external dependency, support for one credential generation was withdrawn, and the graph-store backend shipped as the default was substituted.
+Two of the three already have their technical decision recorded — the credential-generation withdrawal in ADR 9, the graph-backend mechanism in ADR 18 — but in neither case is the scope dimension recorded: that delivered functionality was consciously reduced, on what grounds, and under what condition it would be restored.
+The third has no entry at all.
+A decision log that records only the technical shape of a change leaves a reader unable to tell a deliberate reduction from an oversight.
+Of the three, only the deferral is still open and carries a reactivation trigger; the other two are complete, and what is recorded for them is the condition under which they would be revisited rather than a pending step.
+
+**Decision:** Verifiable-credential-based role assertions are deferred, support for the earlier credential generation is discontinued, and the shipped graph-store default was substituted.
+All three are recorded in this single entry, each with the same four statements — what was reduced, why, what the consequence is and who carries it, and what would reverse it.
+The technical content of ADR 9 and ADR 18 is not repeated here; this entry records the scope decision and points at them.
+
+==== Verifiable-Credential-Based Role Assertions — Deferred
+
+**Reduction:** Role-based access control driven by role assertions carried in a Verifiable Credential held in a user's wallet and presented during authentication — such that the catalogue reports the credential-asserted role among the user's roles — is deferred.
+The requirement remains part of the specification and its solution is designed; it is not built.
+It is the only functional requirement whose delivery is deferred.
+The designed solution keeps the catalogue out of the wallet exchange entirely: presentation verification is delegated to the identity provider over OpenID4VP, and the catalogue retains its existing OAuth2 resource-server pipeline, receiving an ordinary access token whose role claims were derived from the presented credential and become Spring Security authorities by the mapping of ADR 5.
+The credential format is SD-JWT VC, because the identity provider's issuance and verification support covers the SD-JWT and JWT VC serialisations and not JSON-LD proof formats.
+Catalogue-side code is therefore close to none; this is an identity-provider configuration concern.
+
+**Rationale:** Two ways to deliver the requirement within the delivery window were weighed:
+
+1. **Implement a presentation endpoint inside the catalogue.** Unblocked today, but it reintroduces a parallel token issuer alongside the identity provider — precisely the architecture the delegated design avoids.
+2. **Delegate presentation verification to the identity provider (chosen design, deferred).** Blocked by the maturity of the enabling capabilities: as assessed against the identity provider's then-current major release, credential issuance (OpenID4VCI) ships as an experimental, feature-flagged capability, and presentation verification (OpenID4VP) is not part of its core at all — it exists only as an early-stage community extension.
+
+Option 1 is rejected rather than adopted as an interim workaround: it would have to be built, maintained, and then retired once the delegated path becomes viable.
+
+**Consequences:** Deployments that need credential-asserted roles cannot obtain them yet; all other role and permission behaviour is unaffected.
+Because the design places the whole mechanism in identity-provider configuration rather than in the catalogue, resuming the work is a configuration task and not a development one.
+
+**Reactivation trigger:** Re-evaluation is triggered by whichever of the following occurs first: the identity provider reaching general availability of OpenID4VP presentation verification as a supported, non-experimental, in-core feature, with re-evaluation to follow within eight weeks of that release; or a fixed calendar checkpoint of 2026-10-31, so that reactivation does not depend solely on tracking an upstream release.
+
+==== Support for the Earlier Credential Generation — Discontinued
+
+**Reduction:** The catalogue originally supported the earlier trust-framework credential generation in parallel with the current one; that support was removed entirely, narrowing delivered functionality from two credential generations to one.
+The namespaces, the data-model difference, and the technical migration impact are recorded in ADR 9.
+
+**Rationale:** The two class hierarchies are disconnected graphs, so parallel support meant carrying two configuration surfaces and two verification code paths for consumers that were no longer active.
+A second verification stack is also additional attack surface on the very path that establishes trust.
+
+**Consequences:** Federation participants who still hold credentials in the earlier format carry a re-issuance burden: such a credential is no longer recognised as a credential and is stored as unverified generic data, so it must be re-issued in the current format to regain verified status.
+On the catalogue side a single verification path and a single configuration surface remain.
+
+**Reversal:** Effectively none.
+Reversal would mean reinstating a retired data model together with its signature stack, so this adjustment is to be read as permanent rather than as a reduction awaiting a trigger.
+
+==== Graph-Store Backend of the Shipped Default — Substituted
+
+**Reduction:** The redistributed artefacts no longer ship the initially-planned graph backend as the default; the default is the alternative backend already supported behind the same interface.
+The adjustment had two parts, both carried out: the shipped default was switched, and the copyleft-licensed artefacts of the initially-planned backend were removed from the redistributed archive and container image.
+The server of that backend is a separate matter: it was never a redistributed component in the first place, and the deployment packaging does not provision one.
+The runtime backend-switching mechanism is recorded in ADR 18 and is unchanged by this decision.
+
+**Rationale:** Licence compatibility of the redistributed artefacts, which is the single constraint behind both parts.
+The catalogue's own distribution is permissively licensed (Apache-2.0), whereas both the analytics plugin family of the initially-planned backend and the community edition of its server are copyleft-licensed (GPL-3.0).
+Copyleft permits absorbing permissive code into a copyleft work, not the reverse, so neither may form part of the redistributed archive or container image.
+The client library the catalogue links against to reach that backend is permissively licensed and remains in place, so the constraint falls on the redistributed server-side artefacts, not on the ability to talk to that backend.
+This is why the two parts belong to one constraint without being one decision.
+The artefact removal is compelled by the licence directly.
+The default moved because the server of the substituted backend is itself permissively licensed and can therefore be redistributed: the project builds that server as a container image, and the deployment packaging provisions an instance of it.
+The initially-planned backend stays fully reachable, but only at an address the operator supplies and runs, because its server is the part that cannot be redistributed.
+
+**Consequences:** The shipped default is narrower, and the distribution no longer provides the analytics capability itself.
+The interface continues to support the initially-planned backend, so an operator who runs their own instance of it — with whatever analytics they install there — keeps that capability and can switch the catalogue to it.
+What is withdrawn is the distribution's provision of it, not the catalogue's support for it.
+
+**Reversal:** The initially-planned backend becomes eligible as a shipped default again only if its server, and the analytics capability alongside it, become available under a licence the distribution can redistribute.
+Both parts must change: a permissively packaged analytics capability alone would still leave a server that cannot be shipped.
+Absent that, the adjustment stands.
+
 === ADR 21: Asset Version Counter Semantics and PROV-O Predicate Set
 
 **Related:** ADR 7, ADR 10, ADR 22.
