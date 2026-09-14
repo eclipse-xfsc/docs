@@ -18,6 +18,6 @@ At the architectural level, two quality attributes drive the dominant trade-offs
 * **Scalability.** Read paths must scale horizontally (the graph store is a separate, replicable component; the catalogue itself is stateless behind its persistence layer).
 Write paths are serialised through the metadata store so consistency is enforced in one place.
 * **Maintainability.** The catalogue is a long-lived federation service.
-Decisions favour replaceability over coupling: pluggable graph backends (ADR 18), self-contained trust-framework bundles (ADR 10), and a wire-shape-agnostic compliance client (ADR 12 / ADR 17) all exist to let pieces of the system evolve independently.
+Decisions favour replaceability over coupling: pluggable graph backends (ADR 18), self-contained trust-framework bundles (ADR 10), and a wire-shape-agnostic compliance client (ADR 17) all exist to let pieces of the system evolve independently.
 
 The remaining quality attributes (security, reliability, observability) are addressed by the cross-cutting concepts in chapter <<section-concepts>> and the relevant ADRs in chapter <<section-design-decisions>>.

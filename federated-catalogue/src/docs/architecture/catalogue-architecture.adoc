@@ -78,6 +78,10 @@ include::chapters/09_architecture_decisions.adoc[]
 include::chapters/10_quality_requirements.adoc[]
 
 <<<<
+// 11. Risks and Technical Debt
+include::chapters/11_risks_and_technical_debt.adoc[]
+
+<<<<
 // 12. Glossary
 include::chapters/12_glossary.adoc[]
 
