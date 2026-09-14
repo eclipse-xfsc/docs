@@ -159,6 +159,7 @@ jobs:
 
           This is a **documentation snapshot, not a software release.** It versions no component of this
           repository and does not correspond to any version of the Federated Catalogue implementation.
+          The short commit SHA in the tag is the commit of *this* repository that produced the rendering.
 
           | | |
           |---|---|
@@ -171,8 +172,10 @@ jobs:
 
           - \`catalogue-architecture.pdf\` -- the complete document as PDF.
           - \`catalogue-architecture-html.zip\` -- the complete HTML rendering. Unpack and open
-            \`html5/architecture/catalogue-architecture.html\` in a browser; stylesheets, images and
-            generated diagrams are contained in the archive.
+            \`html5/architecture/catalogue-architecture.html\` in a browser. All images and generated
+            diagrams travel with the archive and the main stylesheet is embedded in the page. Three
+            supplementary stylesheets are loaded from CDNs, so without a network connection the
+            admonition icons and the syntax colouring of code blocks are lost, nothing else.
 
           Each documentation change publishes its own dated release. Existing releases are never modified.
           NOTES

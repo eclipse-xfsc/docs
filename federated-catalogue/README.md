@@ -32,6 +32,9 @@ builds the document from the AsciiDoc source in `federated-catalogue/src/docs/` 
 1. **Package** — the PDF and a ZIP of the whole HTML output directory.
 2. **Draft** — a release is created as a *draft* under a new tag
    `cat-architecture-<date>-<short commit SHA>`, for example `cat-architecture-2026-09-14-4be1769`.
+   The SHA is the commit **of this repository** that produced the rendering — the state of the AsciiDoc
+   source, not a version of the Federated Catalogue implementation. `cat` names the component the document
+   describes; it does not tie the release to any release of that component.
 3. **Attach** — both assets are uploaded while the release is still a draft.
 4. **Publish** — the draft is published. Assets are attached *before* publication because GitHub's
    [immutable releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
