@@ -228,8 +228,11 @@ jobs:
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         run: |
           set -euo pipefail
-          # make_latest=false keeps the repository-wide "Latest" marker free: this is a
-          # multi-component repository and a documentation snapshot must not claim it.
+          # make_latest=false stops this documentation snapshot from actively claiming the
+          # repository-wide "Latest" marker. It does not fully suppress it: GitHub derives
+          # .../releases/latest from the newest published release whenever no release claims
+          # the marker. That URL is therefore unusable for linking the document -- in this
+          # multi-component repository it resolves to whichever component published last.
           gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
             -F draft=false \
             -f make_latest=false \

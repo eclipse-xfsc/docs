@@ -1,4 +1,4 @@
-# Architecture document for the GXFS Catalogue
+# Architecture document for the XFSC Federated Catalogue
 
 ## XFSC Federated Catalogue
 
@@ -50,10 +50,11 @@ Points worth knowing before changing any of this:
 - **Each change gets its own release.** Existing releases are never modified. Tag names are permanently
   consumed — GitHub does not release a tag name even after the release is deleted — so the short commit SHA
   in the tag keeps every publication unique.
-- **The release is not marked as the repository's "Latest".** This repository holds several components. A
-  documentation snapshot of the Catalogue must not claim the repository-wide `Latest` marker, and
-  `…/releases/latest` must not be used for links: it resolves to the newest release of the *whole*
-  repository and would silently point at a different component.
+- **Never link `.../releases/latest`.** That URL is repository-wide: it resolves to whichever component
+  published most recently, so the link would silently start pointing at another component's release. The
+  workflow publishes with `make_latest=false` so the snapshot does not actively claim the marker, but GitHub
+  still derives `.../releases/latest` from the newest published release when no release claims it -- the
+  marker can be left unclaimed, not empty.
 - **The workflow uses only the built-in `GITHUB_TOKEN`** (`permissions: contents: write`). No personal
   access token is involved: those are tied to an individual, expire, and would fail silently — nobody would
   notice until someone went looking for a document that had not been updated in months.
