@@ -7,26 +7,20 @@ repository.
 
 ### Download
 
-Every documentation status is published as a release of this repository, tagged `cat-architecture-*`:
+Each documentation status is published as a release of this repository, tagged `cat-architecture-*`. The
+newest one is the current status; the older ones stay retrievable.
 
 **[→ Architecture Document releases](https://github.com/eclipse-xfsc/docs/releases?q=cat-architecture&expanded=true)**
 
-Each release carries two assets:
+Every release carries the document as `catalogue-architecture.pdf` and as `catalogue-architecture-html.zip`,
+a ZIP of the complete HTML rendering. Release assets never expire, need no login, and are unaffected by the
+90-day retention limit that applies to GitHub Actions artifacts.
 
-| Asset | Contents |
-|---|---|
-| `catalogue-architecture.pdf` | the complete document as PDF |
-| `catalogue-architecture-html.zip` | the complete HTML rendering |
-
-The newest release is the current documentation status; the older ones stay retrievable. Release assets
-never expire, need no login, and are unaffected by the 90-day retention limit that applies to GitHub
-Actions artifacts.
-
-To read the HTML rendering, unpack the archive and open `html5/architecture/catalogue-architecture.html`
-in a browser. All images and generated diagrams are contained in the archive and the main stylesheet is
-embedded in the page, so the document is complete and correctly laid out without a network connection.
-Three supplementary stylesheets are still loaded from CDNs (Google Fonts, Font Awesome, highlight.js);
-without network access the admonition icons and the syntax colouring of code blocks are lost, nothing else.
+To read the HTML rendering, unpack the archive and open `html5/architecture/catalogue-architecture.html` in
+a browser. All images and generated diagrams are contained in the archive and the main stylesheet is embedded
+in the page, so the document is complete and correctly laid out without a network connection. Three
+supplementary stylesheets are still loaded from CDNs (Google Fonts, Font Awesome, highlight.js); without
+network access the admonition icons and the syntax colouring of code blocks are lost, nothing else.
 
 ### How the publication works
 
