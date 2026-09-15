@@ -27,7 +27,8 @@ network access the admonition icons and the syntax colouring of code blocks are 
 The [`Run docToolchain`](https://github.com/eclipse-xfsc/docs/actions/workflows/buildDocs.yml) workflow
 (`.github/workflows/buildDocs.yml`) runs on every push to `main` that touches `federated-catalogue/`. It
 builds the document from the AsciiDoc source in `federated-catalogue/src/docs/` via docToolchain
-(`generateHTML`, `generatePDF`) and then publishes it:
+(`generateHTML`, `generatePDF`) and then publishes it. The workflow runs as two jobs: `build` renders and
+packages, `release` creates the release. The four publication steps are:
 
 1. **Package** — the PDF and a ZIP of the whole HTML output directory.
 2. **Draft** — a release is created as a *draft* under a new tag
@@ -51,9 +52,18 @@ Points worth knowing before changing any of this:
   workflow publishes with `make_latest=false` so the snapshot does not actively claim the marker, but GitHub
   still derives `.../releases/latest` from the newest published release when no release claims it -- the
   marker can be left unclaimed, not empty.
-- **The workflow uses only the built-in `GITHUB_TOKEN`** (`permissions: contents: write`). No personal
-  access token is involved: those are tied to an individual, expire, and would fail silently — nobody would
-  notice until someone went looking for a document that had not been updated in months.
+- **The workflow uses only the built-in `GITHUB_TOKEN`.** No personal access token is involved: those are
+  tied to an individual, expire, and would fail silently — nobody would notice until someone went looking
+  for a document that had not been updated in months.
+- **Write access is confined to the `release` job.** The workflow grants `contents: read` by default; only
+  `release` raises it to `contents: write`, and it runs nothing but `gh api` calls. The `build` job — which
+  executes third-party code (npm, docToolchain, Chrome) — therefore never has a token that could change
+  this repository, and its checkout uses `persist-credentials: false` so no token is left in `.git/config`
+  while that code runs. Keep the split when changing the workflow: moving a release step back into `build`
+  silently widens what the build tooling can reach.
+- **The Mermaid CLI is pinned** to an exact version. Unpinned, every run would depend on whatever is
+  current, so the rendered diagrams could change without a commit. Raise the version deliberately and check
+  the diagrams afterwards.
 - **The workflow writes only to this repository.** There are no cross-repository writes anywhere.
 - **The workflow never pushes to this repository.** It only creates a release through the API. Nothing in
   this README has to be regenerated when a release is published, which is why the link above points at the

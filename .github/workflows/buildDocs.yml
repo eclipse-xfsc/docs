@@ -10,10 +10,12 @@ on:
       - 'federated-catalogue/**'
       - '.github/workflows/buildDocs.yml'
 
-# Needed to create releases and upload assets. The built-in GITHUB_TOKEN is
-# sufficient; no personal access token is involved. The workflow never pushes.
+# Read-only by default. Only the `release` job below raises this to `contents: write`,
+# so the build -- which runs third-party tooling (npm, docToolchain, Chrome) -- never has
+# a write-scoped token within reach. The built-in GITHUB_TOKEN is sufficient throughout;
+# no personal access token is involved. The workflow never pushes.
 permissions:
-  contents: write
+  contents: read
 
 # Two pushes in quick succession would otherwise race on release creation. Never
 # cancel a run in progress: it could leave a half-populated draft release behind.
@@ -21,16 +23,20 @@ concurrency:
   group: buildDocs-release
   cancel-in-progress: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Check out code
         uses: actions/checkout@v5
         with:
           lfs: true
+          # Do not leave the token behind in .git/config while the steps below run
+          # third-party code. Nothing in this job talks to the Git remote after checkout.
+          persist-credentials: false
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -48,8 +54,14 @@ jobs:
           which google-chrome || which google-chrome-stable || echo "Chrome not found"
           google-chrome --version || google-chrome-stable --version || echo "Cannot run Chrome"
 
+      # Pinned: an unpinned install makes every run depend on whatever is current, so the
+      # rendering can change without a commit and a bad upstream release lands unasked.
+      # 11.17.0 is the version that rendered the document as it was reviewed. Raise it
+      # deliberately and re-check the diagrams; do not widen this to a range.
+      # Note this pins the tool, not its ~190 transitive dependencies -- those still
+      # resolve at install time. That is why the build job holds no write-scoped token.
       - name: Install Mermaid CLI
-        run: npm install -g @mermaid-js/mermaid-cli
+        run: npm install -g @mermaid-js/mermaid-cli@11.17.0
 
       - name: Verify Mermaid CLI installation and create symlink
         run: |
@@ -99,6 +111,8 @@ jobs:
 
       # ---------------------------------------------------------------------------
       # Durable publication: one immutable, dated release per documentation change.
+      # Packaging happens here because it needs the build output; creating the release
+      # happens in the `release` job below, which is the only one holding write access.
       # ---------------------------------------------------------------------------
 
       - name: Package release assets
@@ -113,12 +127,40 @@ jobs:
           ( cd federated-catalogue/build && zip -r -q "$GITHUB_WORKSPACE/release-assets/catalogue-architecture-html.zip" html5 )
           ls -l release-assets
 
+      # Hand-off to the `release` job. Short retention: this copy exists only for the
+      # next job in the same run, the durable copy is the release asset.
+      - name: Hand release assets to the release job
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-assets
+          path: release-assets/
+          retention-days: 1
+
+  # -----------------------------------------------------------------------------
+  # The only job with write access. It runs no third-party tooling and needs no
+  # checkout: every `gh` call addresses the repository explicitly, the assets arrive
+  # as an artifact, and the tag is derived from $GITHUB_SHA.
+  # -----------------------------------------------------------------------------
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # A same-run artifact download authenticates with the Actions runtime token,
+      # not with GITHUB_TOKEN, so no `actions: read` permission is required here.
+      - name: Fetch release assets
+        uses: actions/download-artifact@v6
+        with:
+          name: release-assets
+          path: release-assets
+
       - name: Compute release identifiers
         id: rel
         run: |
           set -euo pipefail
           date_utc=$(date -u +%Y-%m-%d)
-          short_sha=$(git rev-parse --short=7 "$GITHUB_SHA")
+          short_sha="${GITHUB_SHA::7}"
           tag="cat-architecture-${date_utc}-${short_sha}"
           {
             echo "tag=${tag}"
@@ -135,20 +177,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          # A re-run may find a leftover draft under the same tag. Drafts hold no real
-          # Git tag, so deleting one is safe. A *published* release is never touched:
-          # its tag is permanently burned and the run simply reuses it.
+          # A re-run may find leftover drafts under the same tag. GitHub allows *several*
+          # drafts to share a tag name, because a draft holds no real Git tag -- so this
+          # has to iterate rather than inspect a single record. Every draft is deleted;
+          # a *published* release is never touched: its tag is permanently burned and the
+          # run simply reuses it.
           existing=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
             --jq '.[] | "\(.tag_name) \(.id) \(.draft)"' | awk -v t="$TAG" '$1 == t { print $2, $3 }')
           if [ -n "$existing" ]; then
-            id=${existing%% *}
-            is_draft=${existing##* }
-            if [ "$is_draft" = "true" ]; then
-              echo "Removing leftover draft $id for $TAG"
-              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
-            else
-              echo "Release $TAG is already published (id $id); reusing it."
-              echo "release_id=${id}" >> "$GITHUB_OUTPUT"
+            published_id=""
+            while read -r id is_draft; do
+              if [ "$is_draft" = "true" ]; then
+                echo "Removing leftover draft $id for $TAG"
+                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
+              else
+                published_id="$id"
+              fi
+            done <<< "$existing"
+            if [ -n "$published_id" ]; then
+              echo "Release $TAG is already published (id $published_id); reusing it."
+              echo "release_id=${published_id}" >> "$GITHUB_OUTPUT"
               echo "already_published=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
