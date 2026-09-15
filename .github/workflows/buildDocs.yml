@@ -4,18 +4,39 @@ on:
   push:
     branches:
       - main
+    # Only documentation changes trigger a build, so each merge produces exactly one
+    # release instead of one per unrelated commit.
+    paths:
+      - 'federated-catalogue/**'
+      - '.github/workflows/buildDocs.yml'
 
+# Read-only by default. Only the `release` job below raises this to `contents: write`,
+# so the build -- which runs third-party tooling (npm, docToolchain, Chrome) -- never has
+# a write-scoped token within reach. The built-in GITHUB_TOKEN is sufficient throughout;
+# no personal access token is involved. The workflow never pushes.
+permissions:
+  contents: read
+
+# Two pushes in quick succession would otherwise race on release creation. Never
+# cancel a run in progress: it could leave a half-populated draft release behind.
+concurrency:
+  group: buildDocs-release
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Check out code
         uses: actions/checkout@v5
         with:
           lfs: true
+          # Do not leave the token behind in .git/config while the steps below run
+          # third-party code. Nothing in this job talks to the Git remote after checkout.
+          persist-credentials: false
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -28,13 +49,33 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify Chrome is installed
+      # Resolve Chrome once, for every later step, and fail loudly if it is missing.
+      # The install below skips lifecycle scripts, so Puppeteer fetches no browser of its
+      # own and there is no fallback left: an unresolved Chrome has to stop the run here
+      # rather than surface ten minutes later as a diagram that failed to render.
+      - name: Resolve Chrome
         run: |
-          which google-chrome || which google-chrome-stable || echo "Chrome not found"
-          google-chrome --version || google-chrome-stable --version || echo "Cannot run Chrome"
+          set -euo pipefail
+          chrome=$(command -v google-chrome-stable || command -v google-chrome)
+          "$chrome" --version
+          {
+            echo "CHROME_PATH=${chrome}"
+            echo "PUPPETEER_EXECUTABLE_PATH=${chrome}"
+          } >> "$GITHUB_ENV"
+          echo "Using Chrome at: ${chrome}"
 
+      # Pinned: an unpinned install makes every run depend on whatever is current, so the
+      # rendering can change without a commit and a bad upstream release lands unasked.
+      # 11.17.0 is the version that rendered the document as it was reviewed. Raise it
+      # deliberately and re-check the diagrams; do not widen this to a range.
+      #
+      # --ignore-scripts blocks the lifecycle scripts of all ~190 transitive packages,
+      # which are the code most likely to be hostile in a compromised release and run
+      # before anything else. Nothing here needs them: the only install script that
+      # matters is Puppeteer's browser download, and this workflow uses the runner's own
+      # Chrome via PUPPETEER_EXECUTABLE_PATH instead.
       - name: Install Mermaid CLI
-        run: npm install -g @mermaid-js/mermaid-cli
+        run: npm install -g --ignore-scripts @mermaid-js/mermaid-cli@11.17.0
 
       - name: Verify Mermaid CLI installation and create symlink
         run: |
@@ -45,13 +86,15 @@ jobs:
           which mmdc
           ls -la /usr/local/bin/mmdc
 
+      # Smoke test. It must fail the run: with no bundled browser to fall back on, a
+      # broken Chrome/mmdc pairing would otherwise be discovered only as embedded
+      # "Failed to generate image" text in the published document.
       - name: Test mmdc with simple diagram
         run: |
+          set -euo pipefail
           echo 'graph TD; A-->B;' > test.mmd
-          CHROME_PATH=$(which google-chrome-stable || which google-chrome)
-          echo "Using Chrome at: $CHROME_PATH"
-          PUPPETEER_EXECUTABLE_PATH="$CHROME_PATH" mmdc -i test.mmd -o test.png || echo "mmdc test failed"
-          ls -la test.* || true
+          mmdc -i test.mmd -o test.png
+          ls -la test.png
 
       - name: Install docToolchain locally
         run: |
@@ -61,17 +104,15 @@ jobs:
       - name: Generate HTML Documentation
         run: |
           cd ./federated-catalogue
-          export CHROME_PATH=$(which google-chrome-stable || which google-chrome)
-          echo "Using Chrome at: $CHROME_PATH"
-          PUPPETEER_EXECUTABLE_PATH="$CHROME_PATH" ./dtcw local generateHTML
+          ./dtcw local generateHTML
 
       - name: Generate PDF Documentation
         run: |
           cd ./federated-catalogue
-          export CHROME_PATH=$(which google-chrome-stable || which google-chrome)
-          echo "Using Chrome at: $CHROME_PATH"
-          PUPPETEER_EXECUTABLE_PATH="$CHROME_PATH" ./dtcw local generatePDF
+          ./dtcw local generatePDF
 
+      # Short-lived copy for quick access from the Actions tab. Expires after at most
+      # 90 days -- the durable copy is the release created below.
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -79,3 +120,173 @@ jobs:
           path: |
             federated-catalogue/build/pdf/architecture/catalogue-architecture.pdf
             federated-catalogue/build/html5/
+
+      # ---------------------------------------------------------------------------
+      # Durable publication: one immutable, dated release per documentation change.
+      # Packaging happens here because it needs the build output; creating the release
+      # happens in the `release` job below, which is the only one holding write access.
+      # ---------------------------------------------------------------------------
+
+      - name: Package release assets
+        id: assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp federated-catalogue/build/pdf/architecture/catalogue-architecture.pdf \
+             release-assets/catalogue-architecture.pdf
+          # Zip from build/ so the archive unpacks into a single `html5/` folder with
+          # all stylesheets, images and generated diagrams next to the HTML.
+          ( cd federated-catalogue/build && zip -r -q "$GITHUB_WORKSPACE/release-assets/catalogue-architecture-html.zip" html5 )
+          ls -l release-assets
+
+      # Hand-off to the `release` job. Short retention: this copy exists only for the
+      # next job in the same run, the durable copy is the release asset.
+      - name: Hand release assets to the release job
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-assets
+          path: release-assets/
+          retention-days: 1
+
+  # -----------------------------------------------------------------------------
+  # The only job with write access. It runs no third-party tooling and needs no
+  # checkout: every `gh` call addresses the repository explicitly, the assets arrive
+  # as an artifact, and the tag is derived from $GITHUB_SHA.
+  # -----------------------------------------------------------------------------
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # A same-run artifact download authenticates with the Actions runtime token,
+      # not with GITHUB_TOKEN, so no `actions: read` permission is required here.
+      - name: Fetch release assets
+        uses: actions/download-artifact@v6
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Compute release identifiers
+        id: rel
+        run: |
+          set -euo pipefail
+          date_utc=$(date -u +%Y-%m-%d)
+          short_sha="${GITHUB_SHA::7}"
+          tag="cat-architecture-${date_utc}-${short_sha}"
+          {
+            echo "tag=${tag}"
+            echo "date=${date_utc}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${tag}"
+
+      - name: Create draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.rel.outputs.tag }}
+          DATE: ${{ steps.rel.outputs.date }}
+        run: |
+          set -euo pipefail
+
+          # A re-run may find leftover drafts under the same tag. GitHub allows *several*
+          # drafts to share a tag name, because a draft holds no real Git tag -- so this
+          # has to iterate rather than inspect a single record. Every draft is deleted;
+          # a *published* release is never touched: its tag is permanently burned and the
+          # run simply reuses it.
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+            --jq '.[] | "\(.tag_name) \(.id) \(.draft)"' | awk -v t="$TAG" '$1 == t { print $2, $3 }')
+          if [ -n "$existing" ]; then
+            published_id=""
+            while read -r id is_draft; do
+              if [ "$is_draft" = "true" ]; then
+                echo "Removing leftover draft $id for $TAG"
+                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
+              else
+                published_id="$id"
+              fi
+            done <<< "$existing"
+            if [ -n "$published_id" ]; then
+              echo "Release $TAG is already published (id $published_id); reusing it."
+              echo "release_id=${published_id}" >> "$GITHUB_OUTPUT"
+              echo "already_published=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          cat > release-notes.md <<NOTES
+          Rendered **Architecture Document of the XFSC Federated Catalogue (CAT)**, documentation status of ${DATE}.
+
+          This is a **documentation snapshot, not a software release.** It versions no component of this
+          repository and does not correspond to any version of the Federated Catalogue implementation.
+          The short commit SHA in the tag is the commit of *this* repository that produced the rendering.
+
+          | | |
+          |---|---|
+          | Source repository | \`${GITHUB_REPOSITORY}\`, commit \`${GITHUB_SHA}\` |
+          | Source format | AsciiDoc (arc42), \`federated-catalogue/src/docs/\` |
+          | Generator | docToolchain (\`generateHTML\`, \`generatePDF\`) |
+          | Producing workflow | \`.github/workflows/buildDocs.yml\` ("Run docToolchain") |
+
+          **Assets**
+
+          - \`catalogue-architecture.pdf\` -- the complete document as PDF.
+          - \`catalogue-architecture-html.zip\` -- the complete HTML rendering. Unpack and open
+            \`html5/architecture/catalogue-architecture.html\` in a browser. All images and generated
+            diagrams travel with the archive and the main stylesheet is embedded in the page. Three
+            supplementary stylesheets are loaded from CDNs, so without a network connection the
+            admonition icons and the syntax colouring of code blocks are lost, nothing else.
+
+          Each documentation change publishes its own dated release. Existing releases are never modified.
+          NOTES
+
+          release_id=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="$TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="Federated Catalogue -- Architecture Document (${DATE})" \
+            -f body="$(cat release-notes.md)" \
+            -F draft=true \
+            -F prerelease=false \
+            -f make_latest=false \
+            --jq '.id')
+          echo "Created draft release $release_id for $TAG"
+          echo "release_id=${release_id}" >> "$GITHUB_OUTPUT"
+          echo "already_published=false" >> "$GITHUB_OUTPUT"
+
+      # Assets are attached while the release is still a draft. This is the order GitHub
+      # requires for immutable releases: once published, assets can no longer be added,
+      # replaced or removed.
+      - name: Attach assets to draft
+        if: steps.draft.outputs.already_published != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          upload() {
+            name=$1; type=$2
+            echo "Uploading $name"
+            gh api --method POST \
+              "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${name}" \
+              --header "Content-Type: ${type}" \
+              --input "release-assets/${name}" > /dev/null
+          }
+          upload catalogue-architecture.pdf application/pdf
+          upload catalogue-architecture-html.zip application/zip
+
+      - name: Publish release
+        if: steps.draft.outputs.already_published != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          # make_latest=false stops this documentation snapshot from actively claiming the
+          # repository-wide "Latest" marker. It does not fully suppress it: GitHub derives
+          # .../releases/latest from the newest published release whenever no release claims
+          # the marker. That URL is therefore unusable for linking the document -- in this
+          # multi-component repository it resolves to whichever component published last.
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -f make_latest=false \
+            --jq '.html_url'

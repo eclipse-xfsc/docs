@@ -283,7 +283,7 @@ Notes:
         Parti ->> + AssetStore: deleteAsset(assetHash)
         AssetStore ->> + Graph: deleteClaims()
         Graph -->> - AssetStore:Null
-        Note over AssetStore: AssetDeletedEvent is published before commit;<br/>ValidationResultCleanupListener cascades removal of validation results<br/>and ProvenanceCleanupListener cascades removal of provenance credentials —<br/>see _validation_result_storage.
+        Note over AssetStore: AssetDeletedEvent is published before commit.<br/>ValidationResultCleanupListener cascades removal of validation results<br/>and ProvenanceCleanupListener cascades removal of provenance credentials —<br/>see _validation_result_storage.
         AssetStore -->> - Parti: Null
 
         Parti ->> + Keycloak: DELETE /realms/federated-catalogue-realm/groups/{partID}
