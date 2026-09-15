@@ -49,19 +49,33 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify Chrome is installed
+      # Resolve Chrome once, for every later step, and fail loudly if it is missing.
+      # The install below skips lifecycle scripts, so Puppeteer fetches no browser of its
+      # own and there is no fallback left: an unresolved Chrome has to stop the run here
+      # rather than surface ten minutes later as a diagram that failed to render.
+      - name: Resolve Chrome
         run: |
-          which google-chrome || which google-chrome-stable || echo "Chrome not found"
-          google-chrome --version || google-chrome-stable --version || echo "Cannot run Chrome"
+          set -euo pipefail
+          chrome=$(command -v google-chrome-stable || command -v google-chrome)
+          "$chrome" --version
+          {
+            echo "CHROME_PATH=${chrome}"
+            echo "PUPPETEER_EXECUTABLE_PATH=${chrome}"
+          } >> "$GITHUB_ENV"
+          echo "Using Chrome at: ${chrome}"
 
       # Pinned: an unpinned install makes every run depend on whatever is current, so the
       # rendering can change without a commit and a bad upstream release lands unasked.
       # 11.17.0 is the version that rendered the document as it was reviewed. Raise it
       # deliberately and re-check the diagrams; do not widen this to a range.
-      # Note this pins the tool, not its ~190 transitive dependencies -- those still
-      # resolve at install time. That is why the build job holds no write-scoped token.
+      #
+      # --ignore-scripts blocks the lifecycle scripts of all ~190 transitive packages,
+      # which are the code most likely to be hostile in a compromised release and run
+      # before anything else. Nothing here needs them: the only install script that
+      # matters is Puppeteer's browser download, and this workflow uses the runner's own
+      # Chrome via PUPPETEER_EXECUTABLE_PATH instead.
       - name: Install Mermaid CLI
-        run: npm install -g @mermaid-js/mermaid-cli@11.17.0
+        run: npm install -g --ignore-scripts @mermaid-js/mermaid-cli@11.17.0
 
       - name: Verify Mermaid CLI installation and create symlink
         run: |
@@ -72,13 +86,15 @@ jobs:
           which mmdc
           ls -la /usr/local/bin/mmdc
 
+      # Smoke test. It must fail the run: with no bundled browser to fall back on, a
+      # broken Chrome/mmdc pairing would otherwise be discovered only as embedded
+      # "Failed to generate image" text in the published document.
       - name: Test mmdc with simple diagram
         run: |
+          set -euo pipefail
           echo 'graph TD; A-->B;' > test.mmd
-          CHROME_PATH=$(which google-chrome-stable || which google-chrome)
-          echo "Using Chrome at: $CHROME_PATH"
-          PUPPETEER_EXECUTABLE_PATH="$CHROME_PATH" mmdc -i test.mmd -o test.png || echo "mmdc test failed"
-          ls -la test.* || true
+          mmdc -i test.mmd -o test.png
+          ls -la test.png
 
       - name: Install docToolchain locally
         run: |
@@ -88,16 +104,12 @@ jobs:
       - name: Generate HTML Documentation
         run: |
           cd ./federated-catalogue
-          export CHROME_PATH=$(which google-chrome-stable || which google-chrome)
-          echo "Using Chrome at: $CHROME_PATH"
-          PUPPETEER_EXECUTABLE_PATH="$CHROME_PATH" ./dtcw local generateHTML
+          ./dtcw local generateHTML
 
       - name: Generate PDF Documentation
         run: |
           cd ./federated-catalogue
-          export CHROME_PATH=$(which google-chrome-stable || which google-chrome)
-          echo "Using Chrome at: $CHROME_PATH"
-          PUPPETEER_EXECUTABLE_PATH="$CHROME_PATH" ./dtcw local generatePDF
+          ./dtcw local generatePDF
 
       # Short-lived copy for quick access from the Actions tab. Expires after at most
       # 90 days -- the durable copy is the release created below.

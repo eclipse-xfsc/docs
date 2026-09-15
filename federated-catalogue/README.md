@@ -61,9 +61,13 @@ Points worth knowing before changing any of this:
   this repository, and its checkout uses `persist-credentials: false` so no token is left in `.git/config`
   while that code runs. Keep the split when changing the workflow: moving a release step back into `build`
   silently widens what the build tooling can reach.
-- **The Mermaid CLI is pinned** to an exact version. Unpinned, every run would depend on whatever is
-  current, so the rendered diagrams could change without a commit. Raise the version deliberately and check
-  the diagrams afterwards.
+- **The Mermaid CLI is pinned** to an exact version and installed with `--ignore-scripts`. Unpinned, every
+  run would depend on whatever is current, so the rendered diagrams could change without a commit. Raise the
+  version deliberately and check the diagrams afterwards. `--ignore-scripts` blocks the lifecycle scripts of
+  its transitive packages; the only one that matters is Puppeteer's browser download, and the build uses the
+  runner's own Chrome instead. That leaves no bundled browser to fall back on, which is why Chrome is
+  resolved in one step that fails the run when it is missing, and why the mmdc smoke test is no longer
+  allowed to pass silently.
 - **The workflow writes only to this repository.** There are no cross-repository writes anywhere.
 - **The workflow never pushes to this repository.** It only creates a release through the API. Nothing in
   this README has to be regenerated when a release is published, which is why the link above points at the
