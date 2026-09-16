@@ -409,20 +409,20 @@ classDiagram
     VerificationServiceImpl --> RdfIngestionStrategy : delegates to
     RdfIngestionStrategy <|.. CredentialIngestionStrategy
     RdfIngestionStrategy <|.. NonCredentialIngestionStrategy
-    VerificationServiceImpl --> CredentialFormatDetector : pre-classifies\nnon-JWT bodies
+    VerificationServiceImpl --> CredentialFormatDetector : pre-classifies<br/>non-JWT bodies
     CredentialIngestionStrategy --> ProtectedNamespaceFilter : filters via
     CredentialIngestionStrategy --> CredentialFormatDetector : classifies format
     CredentialIngestionStrategy --> CredentialFormatProcessor : dispatches by format
-    CredentialIngestionStrategy --> EnvelopedCredentialResolver : EVC/EVP unwrap +\ninner-VC verify
+    CredentialIngestionStrategy --> EnvelopedCredentialResolver : EVC/EVP unwrap +<br/>inner-VC verify
     NonCredentialIngestionStrategy --> ProtectedNamespaceFilter : filters via
     CredentialFormatDetector --> CredentialFormatProcessor : iterates ordered chain
     CredentialFormatProcessor <|.. LoireCredentialProcessor
     CredentialFormatProcessor <|.. Vc2DanubeTechCredentialProcessor
-    LoireCredentialProcessor --> LoirePolicyEnforcer : enforces did:web +\ntrust chain
+    LoireCredentialProcessor --> LoirePolicyEnforcer : enforces did#58;web +<br/>trust chain
     LoireCredentialProcessor --> JwtSignatureVerifier : verifies JWT signature
-    Vc2DanubeTechCredentialProcessor --> JwtSignatureVerifier : verifies JWT signature\n(JWT bodies only)
+    Vc2DanubeTechCredentialProcessor --> JwtSignatureVerifier : verifies JWT signature<br/>(JWT bodies only)
     LoirePolicyEnforcer --> TrustFrameworkService : isEnabled("gaia-x")
-    LoirePolicyEnforcer --> TrustFrameworkRegistry : reads trust_anchor_url\nfrom bundle properties
+    LoirePolicyEnforcer --> TrustFrameworkRegistry : reads trust_anchor_url<br/>from bundle properties
     EnvelopedCredentialResolver --> JwtSignatureVerifier : verifies inner VC JWTs
     CredentialVerificationResult <|-- NonCredentialVerificationResult
 ....
@@ -562,7 +562,7 @@ classDiagram
     TrustFrameworkRegistryImpl --> ResolvedBaseClass : returns
     TrustFrameworkBundleLoader --> TrustFrameworkBundle : produces
     CredentialIngestionStrategy --> TrustFrameworkRegistry : resolves credential subject base classes
-    TrustFrameworkService --> TrustFrameworkRepository : reads/writes\nenabled flag
+    TrustFrameworkService --> TrustFrameworkRepository : reads/writes<br/>enabled flag
     LoirePolicyEnforcer --> TrustFrameworkService : isEnabled("gaia-x")
 ....
 

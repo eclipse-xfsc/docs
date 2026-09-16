@@ -109,7 +109,7 @@ classDiagram
     Credential ..> Claim : contains
     NonCredential ..> Claim : contains
 
-    note for Claim "A Claim is the atomic unit\nof semantic assertion (Triple)."
+    note for Claim "A Claim is the atomic unit<br/>of semantic assertion (Triple)."
 ....
 
 Key concepts:
